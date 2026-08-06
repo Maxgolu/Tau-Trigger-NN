@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.idea/
+.ipynb_checkpoints/
+.venv/
+
+experiments/
+
+Background/*.csv
+Background/*.npz
+Signal/*.csv
+Signal/*.npz
+
+*.pth
+*.pt
+*.parquet
