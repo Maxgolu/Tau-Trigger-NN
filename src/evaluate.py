@@ -3,39 +3,95 @@ import os
 import json
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.stats import chi2
+from pathlib import Path
 
-DEFAULT_FOLDER = "experiments\config batch 6 - simple stuff - fixed model weights to have validation"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
+
+def build_event_trigger_scores(df, criterion, objects=2):
+    """Return the score at which every background event starts to pass.
+
+    With the common ``score >= threshold`` rule, an event passes an
+    ``at least objects`` trigger exactly when its objects-th highest score is
+    at least the threshold. Events with too few finite objects never pass but
+    remain part of the FPR denominator.
+    """
+    if objects < 1:
+        raise ValueError("objects must be at least 1")
+    required = {"eventNumber", criterion}
+    missing = required.difference(df.columns)
+    if missing:
+        raise KeyError(f"Missing required columns: {sorted(missing)}")
+
+    event_count = int(df["eventNumber"].nunique())
+    if event_count == 0:
+        raise ValueError("Cannot calibrate a threshold without background events")
+
+    finite_rows = df.loc[
+        np.isfinite(df[criterion].to_numpy(dtype=float)),
+        ["eventNumber", criterion],
+    ]
+    ordered = finite_rows.sort_values(
+        ["eventNumber", criterion], ascending=[True, False], kind="mergesort"
+    )
+    kth_scores = (
+        ordered.groupby("eventNumber", sort=False)[criterion]
+        .nth(objects - 1)
+        .to_numpy(dtype=float)
+    )
+    return kth_scores, event_count
+
+
+def select_fpr_threshold(event_trigger_scores, event_count, target_fake_rate):
+    """Select the lowest threshold whose empirical event FPR is within target.
+
+    Tied scores are kept together. Therefore the achieved FPR can be below the
+    requested value when no deterministic threshold can attain it exactly.
+    """
+    if not 0.0 <= target_fake_rate <= 1.0:
+        raise ValueError("target_fake_rate must be between 0 and 1")
+    if event_count <= 0:
+        raise ValueError("event_count must be positive")
+
+    scores = np.asarray(event_trigger_scores, dtype=float)
+    scores = scores[np.isfinite(scores)]
+    if scores.size == 0:
+        return np.inf, 0.0
+
+    # The integer budget guarantees achieved_fpr <= target_fake_rate.
+    max_accepted = int(np.floor(target_fake_rate * event_count + 1e-12))
+    unique_scores, tied_counts = np.unique(scores, return_counts=True)
+    unique_scores = unique_scores[::-1]
+    tied_counts = tied_counts[::-1]
+    cumulative = np.cumsum(tied_counts)
+    feasible = np.flatnonzero(cumulative <= max_accepted)
+
+    if feasible.size == 0:
+        # Including even the highest tied score would exceed the target.
+        threshold = np.nextafter(unique_scores[0], np.inf)
+    else:
+        last = int(feasible[-1])
+        threshold = unique_scores[last]
+
+    # Recompute with the exact same >= rule used by the final efficiency curve.
+    achieved_fpr = float(np.count_nonzero(scores >= threshold) / event_count)
+    return float(threshold), achieved_fpr
+
 
 def CalcThresh(DF, Criteria, FakeRate, objects=2):
-    ### This funCalcThreshctions calculates what is the need threshold for "Criteria" columns in the bkg dataframe "DF",
-    ###  such that the fakerate "FakeRate" is acquired for the passing of "objects" objects per event with the same id in "event_num" column.
-    MaxVal = np.max(DF[Criteria].values)
-    DF2 = DF.copy()
-    DF[Criteria] /= MaxVal  ### normalize it to 1 to make the binary search quicker
-    DF["signal"] = 0  # DROR: "Pretty sure this is useless, it's all BK so it should just be zero alerady"
-    powers = 15  ### how many iterations in the binary tree
-    threshold = 0.5
-    for i in tqdm(range(2, powers)):
-        TempDF = DF.copy()
-        TempDF.loc[TempDF[Criteria] > threshold, "signal"] = 1
-        TempDF = TempDF.groupby("eventNumber").sum().reset_index(drop=True)
-        Denom = float(TempDF.shape[0])
-        Numer = (TempDF["signal"] >= objects).sum()
-        ratio = Numer / Denom
-        if ratio > FakeRate:
-            threshold += np.power(0.5, i)
-        else:
-            threshold -= np.power(0.5, i)
-
-    return threshold * MaxVal, ratio
+    """Backward-compatible wrapper for exact event-level FPR calibration."""
+    event_scores, event_count = build_event_trigger_scores(DF, Criteria, objects)
+    return select_fpr_threshold(event_scores, event_count, FakeRate)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Tau Particle NN Predictions")
     parser.add_argument("--experiment_dir", type=str, default=None,
                         help="Path to the experiment directory. If omitted, runs on all subfolders.")
+    parser.add_argument("--experiments_dir", type=str, default=str(DEFAULT_EXPERIMENTS_DIR),
+                        help="Directory containing experiment subfolders.")
     parser.add_argument("--recalc", action="store_true",
                         help="Recalculates even if metrics.json already exists.")
 
@@ -56,6 +112,59 @@ def fermi_dirac(x, plateau, slope, midpoint):
     return plateau / (1.0 + np.exp(-np.clip(slope * (x - midpoint), -500, 500)))
 
 
+def save_turn_on_plot(metrics, exp_dir):
+    """Save a basic turn-on plot beside the numerical metrics."""
+    curve = metrics["turn_on_curve"]
+    bins = np.asarray(curve["bins"], dtype=float)
+    centers = (bins[:-1] + bins[1:]) / 2.0
+    efficiencies = np.asarray(curve["binned_efficiencies"], dtype=float)
+    errors = np.asarray(curve["binned_efficiencies_err"], dtype=float)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.errorbar(centers, efficiencies, yerr=errors, fmt="o", markersize=4,
+                capsize=2, label="Measured efficiency")
+
+    fit = curve["fermi_dirac_fit"]
+    if curve.get("fit_success"):
+        x_fit = np.linspace(bins[0], bins[-1], 500)
+        y_fit = fermi_dirac(x_fit, fit["plateau"], fit["slope"], fit["midpoint"])
+        ax.plot(x_fit, y_fit, label="Inverse Fermi-Dirac fit")
+
+    ax.set_xlabel(f"{curve['binning_variable']} [GeV]")
+    ax.set_ylabel("Signal efficiency")
+    ax.set_ylim(0.0, 1.05)
+    ax.grid(alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    plot_path = os.path.join(exp_dir, "turn_on_curve.png")
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved turn-on plot to {plot_path}")
+
+
+def load_predictions(exp_dir):
+    """Load predictions from preferred Parquet storage or the CSV fallback."""
+    parquet_path = os.path.join(exp_dir, "predictions.parquet")
+    csv_path = os.path.join(exp_dir, "predictions.csv")
+
+    if os.path.exists(parquet_path):
+        try:
+            print(f"Loading predictions from {parquet_path}...")
+            return pd.read_parquet(parquet_path)
+        except (ImportError, OSError) as error:
+            if not os.path.exists(csv_path):
+                raise RuntimeError(
+                    f"Could not read {parquet_path} and no predictions.csv fallback exists"
+                ) from error
+            print(f"Parquet unavailable ({error.__class__.__name__}); loading CSV fallback.")
+
+    if os.path.exists(csv_path):
+        print(f"Loading predictions from {csv_path}...")
+        return pd.read_csv(csv_path)
+
+    return None
+
+
 def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
     print(f"\n{'=' * 40}")
     print(f"Evaluating Experiment: {exp_dir}")
@@ -67,13 +176,10 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
         print(f"  -> metrics.json already exists. Skipping (use --recalc to override).\n")
         return
 
-    parquet_path = os.path.join(exp_dir, "predictions.parquet")
-    if not os.path.exists(parquet_path):
-        print(f"  -> Could not find predictions.parquet in {exp_dir}. Skipping.\n")
+    df = load_predictions(exp_dir)
+    if df is None:
+        print(f"  -> Could not find predictions.parquet or predictions.csv in {exp_dir}. Skipping.\n")
         return
-
-    print(f"Loading predictions from {parquet_path}...")
-    df = pd.read_parquet(parquet_path)
 
     # CRITICAL FIX 1: Convert MeV to GeV for specific kinematic columns
     if 'tob_pt' in df.columns:
@@ -91,19 +197,33 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
 
     target_fake_rates = [0.005, 0.010, 0.020]
     thresholds = {}
+    achieved_fake_rates = {}
     global_efficiencies = {}
 
     print("Calculating Thresholds and Global Efficiencies...")
+    event_trigger_scores, background_event_count = build_event_trigger_scores(
+        bkg_df, 'nn_score', objects=2
+    )
     for fr in target_fake_rates:
-        # threshold = np.percentile(bkg_df['nn_score'], (1.0 - fr) * 100) # old STUPID gemini code. Sorry gembros
-        threshold, ratio = CalcThresh(bkg_df, 'nn_score', fr)
+        threshold, ratio = select_fpr_threshold(
+            event_trigger_scores, background_event_count, fr
+        )
         sig_passed = len(sig_df[sig_df['nn_score'] >= threshold])
         eff = sig_passed / len(sig_df) if len(sig_df) > 0 else 0.0
 
         fr_str = f"{fr * 100:.1f}%"
         thresholds[fr_str] = float(threshold)
+        achieved_fake_rates[fr_str] = float(ratio)
         global_efficiencies[fr_str] = float(eff)
-        print(f"  Fake Rate: {fr_str:>4} -> Cut: {threshold:7.4f} | Signal Eff: {eff:.4f}")
+        print(
+            f"  Target FPR: {fr_str:>4} | Achieved FPR: {ratio * 100:7.4f}% "
+            f"| Cut: {threshold:9.6g} | Signal Eff: {eff:.4f}"
+        )
+        if fr - ratio > (1.0 / background_event_count) + 1e-12:
+            print(
+                "    Note: score ties prevent a closer deterministic operating "
+                "point without exceeding the target."
+            )
 
     target_fr = "0.5%"
     working_threshold = thresholds[target_fr]
@@ -174,6 +294,7 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
 
     metrics = {
         "thresholds_by_fake_rate": thresholds,
+        "achieved_fake_rates": achieved_fake_rates,
         "global_efficiency": global_efficiencies,
         "turn_on_curve": {
             "binning_variable": bin_var,
@@ -195,6 +316,8 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=4)
 
+    save_turn_on_plot(metrics, exp_dir)
+
     print(f"\nEvaluation complete! Hard numbers saved to {metrics_path}")
 
 
@@ -215,6 +338,10 @@ def generate_averaged_metrics(exp_name, folders):
     # Average the thresholds and global efficiencies across all fake rates
     avg_thresholds = {k: np.mean([m["thresholds_by_fake_rate"][k] for m in all_metrics]) for k in
                       base["thresholds_by_fake_rate"]}
+    avg_achieved_fake_rates = {
+        k: np.mean([m["achieved_fake_rates"][k] for m in all_metrics])
+        for k in base["achieved_fake_rates"]
+    }
     avg_global_effs = {k: np.mean([m["global_efficiency"][k] for m in all_metrics]) for k in base["global_efficiency"]}
 
     # Average the bins
@@ -250,6 +377,7 @@ def generate_averaged_metrics(exp_name, folders):
 
     metrics_averaged = {
         "thresholds_by_fake_rate": {k: float(v) for k, v in avg_thresholds.items()},
+        "achieved_fake_rates": {k: float(v) for k, v in avg_achieved_fake_rates.items()},
         "global_efficiency": {k: float(v) for k, v in avg_global_effs.items()},
         "turn_on_curve": {
             "binning_variable": bin_var,
@@ -277,17 +405,25 @@ def generate_averaged_metrics(exp_name, folders):
 def main():
     args = parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    base_dir = os.path.abspath(os.path.join(script_dir, "..", DEFAULT_FOLDER))
+    base_dir = os.path.abspath(args.experiments_dir)
 
     # 1. Standard evaluation sequence
     if args.experiment_dir:
-        evaluate_experiment(args.experiment_dir, args.recalc, args.num_bins, args.pt_min, args.pt_max, args.bin_var)
+        experiment_dir = os.path.abspath(args.experiment_dir)
+        evaluate_experiment(experiment_dir, args.recalc, args.num_bins, args.pt_min, args.pt_max, args.bin_var)
+        base_dir = os.path.dirname(experiment_dir)
     else:
+        if not os.path.isdir(base_dir):
+            print(f"Experiments directory not found: {base_dir}")
+            return
         print(f"No --experiment_dir provided. Scanning '{base_dir}' for experiment folders...")
         for item in sorted(os.listdir(base_dir)):
             item_path = os.path.join(base_dir, item)
-            if os.path.isdir(item_path) and os.path.exists(os.path.join(item_path, "predictions.parquet")):
+            has_predictions = (
+                os.path.exists(os.path.join(item_path, "predictions.parquet"))
+                or os.path.exists(os.path.join(item_path, "predictions.csv"))
+            )
+            if os.path.isdir(item_path) and has_predictions:
                 evaluate_experiment(item_path, args.recalc, args.num_bins, args.pt_min, args.pt_max, args.bin_var)
 
     # 2. Always group and average the seeds afterward
@@ -307,8 +443,13 @@ def main():
         if os.path.isdir(item_path) and os.path.exists(config_path) and os.path.exists(metrics_path):
             with open(config_path, 'r') as f:
                 config = json.load(f)
-                exp_name = config.get("experiment_name", "unknown")
-                experiment_groups[exp_name].append(item_path)
+            with open(metrics_path, 'r') as f:
+                metrics = json.load(f)
+            if "achieved_fake_rates" not in metrics:
+                print(f"  -> Skipping legacy metrics without verified FPR: {item_path}")
+                continue
+            exp_name = config.get("experiment_name", "unknown")
+            experiment_groups[exp_name].append(item_path)
 
     for exp_name, folders in experiment_groups.items():
         if len(folders) > 1:

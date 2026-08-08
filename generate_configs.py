@@ -1,89 +1,100 @@
-import os
+import argparse
 import json
 from itertools import product
+from pathlib import Path
 
 
-def generate_sweep_configs():
-    # 1. Define your base static architecture
-    base_config = {
-        "epochs": 20,
-        # hidden_layers removed from here to be dynamically generated
+PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_CONFIG_DIR = PROJECT_ROOT / "configs"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate TauNet training configurations")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_CONFIG_DIR,
+        help="Directory in which config JSON files are created.",
+    )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Generate one lightweight CPU configuration instead of the full sweep.",
+    )
+    return parser.parse_args()
+
+
+def write_config(config, output_dir, filename):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filepath = output_dir / filename
+    with filepath.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4)
+    return filepath
+
+
+def generate_smoke_config(output_dir=DEFAULT_CONFIG_DIR):
+    """Create one intentionally small end-to-end CPU test configuration."""
+    config = {
+        "run_id": "smoke_s42",
+        "experiment_name": "Smoke_CPU_tob_pt",
+        "learning_rate": 0.001,
+        "batch_size": 256,
+        "hidden_layers": [16, 8],
+        "features_to_use": ["tob_pt_only"],
+        "epochs": 2,
+        "seed": 42,
+        "max_events_per_class": 5000,
     }
+    filepath = write_config(config, Path(output_dir), "smoke_s42.json")
+    print(f"Generated smoke-test configuration: {filepath}")
 
-    # 2. Define the hyperparameter grids you want to test
+
+def generate_sweep_configs(output_dir=DEFAULT_CONFIG_DIR):
+    base_config = {"epochs": 20}
     learning_rates = [0.001]
     batch_sizes = [256]
-
-    # ARCHITECTURE: Enforced to only test the base (32x16) model
-    architectures = [
-        [32, 16]
-    ]
-
-    #########################################################
-    #       DYNAMIC FEATURE COMBINATION GENERATION          #
-    #########################################################
-
+    architectures = [[32, 16]]
     feature_sets = [
-        # 1. tob_pt by itself
         ["tob_pt_only"],
-
-        # 2. 3x3 maxdist + tob_pt
         ["em2_3x3_maxdist", "tob_pt_only"],
-
-        # 3. EM2 dominance + tob_pt
         ["em2_3x3_dominance", "tob_pt_only"],
-
-        # 4. EM2 dominance + 3x3 maxdist
         ["em2_3x3_dominance", "em2_3x3_maxdist"],
-
-        # 5. EM2 dominance + 3x3 maxdist + tob_pt
-        ["em2_3x3_dominance", "em2_3x3_maxdist", "tob_pt_only"]
+        ["em2_3x3_dominance", "em2_3x3_maxdist", "tob_pt_only"],
     ]
-
-    #########################################################
-    ##################### STOP EDITING ######################
-    #########################################################
-
-    # 3. Define the seeds for statistical averaging
     seeds = [42, 123, 456]
 
-    # Create output directory
-    output_dir = "configs/"
-    os.makedirs(output_dir, exist_ok=True)
-
+    output_dir = Path(output_dir)
     count = 0
-    # 4. Loop through every combination, now including architectures
-    for lr, bs, arch, features, seed in product(learning_rates, batch_sizes, architectures, feature_sets, seeds):
-        # Join all feature names together with an underscore for the filename
+    combinations = product(learning_rates, batch_sizes, architectures, feature_sets)
+    for config_number, (lr, bs, arch, features) in enumerate(combinations, start=1):
         features_str = "_".join(features)
-
-        # Create a string representation of the architecture for the filename
-        # e.g., [32, 16] -> "32x16"
         arch_str = "x".join(map(str, arch))
+        experiment_name = f"TauNet_lr{lr}_bs{bs}_arch{arch_str}_{features_str}"
 
-        # Build a descriptive experiment name (OMIT THE SEED HERE)
-        exp_name = f"TauNet_lr{lr}_bs{bs}_arch{arch_str}_{features_str}"
+        for seed in seeds:
+            config = base_config.copy()
+            config.update(
+                {
+                    # Short IDs are used only for paths. Full metadata remains below.
+                    "run_id": f"c{config_number:03d}_s{seed}",
+                    "experiment_name": experiment_name,
+                    "learning_rate": lr,
+                    "batch_size": bs,
+                    "hidden_layers": arch,
+                    "features_to_use": features,
+                    "seed": seed,
+                }
+            )
+            filename = f"c{config_number:03d}_s{seed}.json"
+            write_config(config, output_dir, filename)
+            count += 1
 
-        # Assemble the final dictionary
-        config = base_config.copy()
-        config["experiment_name"] = exp_name
-        config["learning_rate"] = lr
-        config["batch_size"] = bs
-        config["hidden_layers"] = arch  # Dynamically set the architecture
-        config["features_to_use"] = features
-        config["seed"] = seed
-
-        # Save to a uniquely named file so we don't overwrite the different seeds
-        filename = f"{exp_name}_seed{seed}.json"
-        filepath = os.path.join(output_dir, filename)
-
-        with open(filepath, 'w') as f:
-            json.dump(config, f, indent=4)
-
-        count += 1
-
-    print(f"Successfully generated {count} configuration files in '{output_dir}/'")
+    print(f"Successfully generated {count} configuration files in '{output_dir}'")
 
 
 if __name__ == "__main__":
-    generate_sweep_configs()
+    args = parse_args()
+    if args.smoke_test:
+        generate_smoke_config(args.output_dir)
+    else:
+        generate_sweep_configs(args.output_dir)

@@ -1,0 +1,10 @@
+torch
+numpy
+pandas
+scipy
+tqdm
+pyarrow
+matplotlib
+seaborn
+plotly
+jupyter

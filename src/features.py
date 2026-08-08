@@ -480,7 +480,7 @@ def get_em2_3x3_maxratio_approx(df: pd.DataFrame) -> np.ndarray:
 
 def get_em2_3x3_maxdist(df: pd.DataFrame) -> np.ndarray:
     """
-    Calculates the spatial Euclidean distance between the highest
+    Calculates the squared spatial Euclidean distance between the highest
     and second-highest energy cells in the 3x3 EM2 layer.
     """
     all_layers = get_5_layers_3x3(df)
@@ -498,7 +498,7 @@ def get_em2_3x3_maxdist(df: pd.DataFrame) -> np.ndarray:
         y1, x1 = np.unravel_index(idx1, (3, 3))
         y2, x2 = np.unravel_index(idx2, (3, 3))
 
-        distances[i, 0] = np.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2) # TODO: whoops? should be without sqrt. Could this be why it's the best? need to fix
+        distances[i, 0] = (y2 - y1) ** 2 + (x2 - x1) ** 2
 
     return distances
 

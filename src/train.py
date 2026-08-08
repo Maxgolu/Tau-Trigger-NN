@@ -10,10 +10,17 @@ import numpy as np
 import os
 import glob
 import copy
+from pathlib import Path
 
 from features import FEATURE_REGISTRY
 from model import DynamicMLP
 from tracker import ExperimentTracker
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIGS_DIR = PROJECT_ROOT / "configs"
+DEFAULT_DATA_DIR = PROJECT_ROOT
+DEFAULT_EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
 
 
 def parse_args():
@@ -22,8 +29,16 @@ def parse_args():
     parser.add_argument("--config", type=str, default=None,
                         help="Path to a specific config JSON file")
     # Add a default directory to scan
-    parser.add_argument("--configs_dir", type=str, default="configs",
+    parser.add_argument("--configs_dir", type=str, default=str(DEFAULT_CONFIGS_DIR),
                         help="Directory containing config files to run if --config is not set")
+    parser.add_argument("--data_dir", type=str, default=str(DEFAULT_DATA_DIR),
+                        help="Project directory containing Signal/ and Background/")
+    parser.add_argument("--experiments_dir", type=str, default=str(DEFAULT_EXPERIMENTS_DIR),
+                        help="Directory in which experiment outputs are stored")
+    parser.add_argument("--max_events_per_class", type=int, default=None,
+                        help="Optional CPU smoke-test limit for Signal and Background events")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Optional command-line override for the configured epoch count")
     # Add the force flag
     parser.add_argument("--force_redo", action="store_true",
                         help="Force training even if experiment with same name and seed exists")
@@ -40,8 +55,13 @@ def get_completed_runs(base_dir="experiments"):
         return completed
 
     for folder in os.listdir(base_dir):
-        config_path = os.path.join(base_dir, folder, "config.json")
-        if os.path.exists(config_path):
+        run_dir = os.path.join(base_dir, folder)
+        config_path = os.path.join(run_dir, "config.json")
+        has_predictions = (
+            os.path.exists(os.path.join(run_dir, "predictions.parquet"))
+            or os.path.exists(os.path.join(run_dir, "predictions.csv"))
+        )
+        if os.path.exists(config_path) and has_predictions:
             try:
                 with open(config_path, 'r') as f:
                     cfg = json.load(f)
@@ -55,7 +75,43 @@ def get_completed_runs(base_dir="experiments"):
     return completed
 
 
-def run_training_pipeline(config_path):
+def _load_csv_for_events(csv_path, event_numbers=None):
+    """Load a full CSV, or stream-filter it for a smoke-test event subset."""
+    if event_numbers is None:
+        return pd.read_csv(csv_path)
+
+    selected_events = set(np.asarray(event_numbers).tolist())
+    filtered_chunks = []
+    for chunk in pd.read_csv(csv_path, chunksize=100_000):
+        selected = chunk[chunk["eventNumber"].isin(selected_events)]
+        if not selected.empty:
+            filtered_chunks.append(selected)
+    if not filtered_chunks:
+        raise ValueError(f"No CSV rows matched the selected events in {csv_path}")
+    return pd.concat(filtered_chunks, ignore_index=True)
+
+
+def _load_npz_arrays(npz_path, max_events, rng):
+    """Load required arrays, optionally retaining a random event subset."""
+    with np.load(npz_path) as data:
+        event_count = len(data["event_nums"])
+        if max_events is None or max_events >= event_count:
+            indices = slice(None)
+        else:
+            indices = np.sort(rng.choice(event_count, size=max_events, replace=False))
+
+        arrays = {
+            "event_nums": data["event_nums"][indices].copy(),
+            "X_tensors": data["X_tensors"][indices].copy(),
+            "X_em2_tensors": data["X_em2_tensors"][indices].copy(),
+            "X_feats": data["X_feats"][indices].copy(),
+        }
+    return arrays
+
+
+def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
+                          experiments_dir=DEFAULT_EXPERIMENTS_DIR,
+                          max_events_per_class=None, epochs_override=None):
     """
     This function wraps all data loading, model init, and training loops.
     """
@@ -63,6 +119,11 @@ def run_training_pipeline(config_path):
     # Load Configuration & Tracker
     with open(config_path, 'r') as f:
         config = json.load(f)
+
+    if max_events_per_class is not None:
+        config["max_events_per_class"] = max_events_per_class
+    if epochs_override is not None:
+        config["epochs"] = epochs_override
 
     # Lock the seed
     seed = config.get("seed", 42)
@@ -76,24 +137,38 @@ def run_training_pipeline(config_path):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    # 2. Init tracker
-    tracker = ExperimentTracker(config)
-    print(f"Started experiment: {tracker.experiment_dir}")
-
     # =====================================================================
     # 2. EXACT PHYSICS DATA LOADING & ALIGNMENT (From NN_Example.ipynb)
     # =====================================================================
     print("Loading NPZ and CSV data...")
-    sig_csv_path = "Signal/signal_combined.csv"
-    sig_npz_path = "Signal/signal_combined.npz"
-    bkg_csv_path = "Background/bkg_combined.csv"
-    bkg_npz_path = "Background/bkg_combined.npz"
+    data_dir = Path(data_dir).resolve()
+    sig_csv_path = data_dir / "Signal" / "signal_combined.csv"
+    sig_npz_path = data_dir / "Signal" / "signal_combined.npz"
+    bkg_csv_path = data_dir / "Background" / "bkg_combined.csv"
+    bkg_npz_path = data_dir / "Background" / "bkg_combined.npz"
+
+    required_paths = [sig_csv_path, sig_npz_path, bkg_csv_path, bkg_npz_path]
+    missing_paths = [str(path) for path in required_paths if not path.is_file()]
+    if missing_paths:
+        raise FileNotFoundError("Missing required data files:\n" + "\n".join(missing_paths))
+
+    # Init the tracker only after validating the inputs.
+    tracker = ExperimentTracker(config, base_dir=str(Path(experiments_dir).resolve()))
+    print(f"Started experiment: {tracker.experiment_dir}")
 
     # Load arrays and dataframes
-    npz_sig = np.load(sig_npz_path)
-    npz_bkg = np.load(bkg_npz_path)
-    df_sig = pd.read_csv(sig_csv_path)
-    df_bkg = pd.read_csv(bkg_csv_path)
+    max_events = config.get("max_events_per_class")
+    if max_events is not None and max_events <= 0:
+        raise ValueError("max_events_per_class must be a positive integer")
+    rng = np.random.default_rng(seed)
+    npz_sig = _load_npz_arrays(sig_npz_path, max_events, rng)
+    npz_bkg = _load_npz_arrays(bkg_npz_path, max_events, rng)
+    df_sig = _load_csv_for_events(sig_csv_path, npz_sig["event_nums"] if max_events else None)
+    df_bkg = _load_csv_for_events(bkg_csv_path, npz_bkg["event_nums"] if max_events else None)
+
+    if max_events:
+        print(f"Smoke-test subset: {len(npz_sig['event_nums'])} signal + "
+              f"{len(npz_bkg['event_nums'])} background events")
 
     # Offset background events to avoid overlapping
     ev_nums_sig = npz_sig["event_nums"]
@@ -311,9 +386,8 @@ def run_training_pipeline(config_path):
     df_eval = df_test_meta[core_columns].copy()
 
     # Save everything to the fast Parquet format
-    tracker.save_predictions(df_eval)
-
-    print(f"--> Saved rich physics predictions to: predictions.parquet")
+    predictions_path = tracker.save_predictions(df_eval)
+    print(f"--> Saved rich physics predictions to: {predictions_path}")
 
     # =====================================================================
     # OPTIONAL: BACKWARD COMPATIBILITY EXPORT (For Old TOC_1D Notebook)
@@ -326,17 +400,12 @@ def run_training_pipeline(config_path):
         'eventNumber', 'tob_index', 'signal', 'Type',
         'truth_pt', 'tob_pt', 'tob_eta', 'tob_phi', 'nn_score'
     ]
-    df_legacy = df_test_meta[legacy_columns].copy()
-
-    # Translate to the old naming conventions
-    # df_legacy.rename(columns={'eventNumber': 'event_num'}, inplace=True)
-    df_legacy['Type'] = df_legacy['Type'].replace('Background', 'BKG')
-
-    # Save directly into the current experiment's timestamped folder
-    import os
-    csv_path = os.path.join(tracker.experiment_dir, "legacy_results_with_scores.csv")
-    df_legacy.to_csv(csv_path, index=False)
-    print(f"--> Saved backward-compatible CSV to: {csv_path}")
+    if config.get("save_legacy_csv", False):
+        df_legacy = df_test_meta[legacy_columns].copy()
+        df_legacy['Type'] = df_legacy['Type'].replace('Background', 'BKG')
+        csv_path = os.path.join(tracker.experiment_dir, "legacy_results_with_scores.csv")
+        df_legacy.to_csv(csv_path, index=False)
+        print(f"--> Saved backward-compatible CSV to: {csv_path}")
 
     # =====================================================================
 
@@ -363,7 +432,7 @@ def main():
             return
 
     # 2. Map what has already been done
-    completed_runs = get_completed_runs() if not args.force_redo else set()
+    completed_runs = get_completed_runs(args.experiments_dir) if not args.force_redo else set()
 
     # 3. Execute the loop
     for config_path in sorted(configs_to_run):
@@ -380,7 +449,13 @@ def main():
             continue
 
         print(f"\n{'=' * 60}\nExecuting {config_path}\n{'=' * 60}")
-        run_training_pipeline(config_path)
+        run_training_pipeline(
+            config_path,
+            data_dir=args.data_dir,
+            experiments_dir=args.experiments_dir,
+            max_events_per_class=args.max_events_per_class,
+            epochs_override=args.epochs,
+        )
 
 
 if __name__ == "__main__":

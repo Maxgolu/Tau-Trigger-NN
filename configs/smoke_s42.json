@@ -1,0 +1,16 @@
+{
+    "run_id": "smoke_s42",
+    "experiment_name": "Smoke_CPU_tob_pt",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        16,
+        8
+    ],
+    "features_to_use": [
+        "tob_pt_only"
+    ],
+    "epochs": 2,
+    "seed": 42,
+    "max_events_per_class": 5000
+}

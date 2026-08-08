@@ -1,6 +1,8 @@
 import os
 import json
 import datetime
+import hashlib
+import re
 import torch
 import pandas as pd
 
@@ -18,9 +20,19 @@ class ExperimentTracker:
         self.base_dir = base_dir
         self.experiment_name = config.get("experiment_name", "unnamed_run")
 
-        # 1. Generate unique timestamped folder name
+        # Folder names deliberately use a short ID. The full descriptive name and
+        # all hyperparameters remain archived in config.json.
+        configured_run_id = str(config.get("run_id", "")).strip()
+        if configured_run_id:
+            run_id = re.sub(r"[^A-Za-z0-9_-]", "-", configured_run_id)[:40]
+        else:
+            fingerprint = hashlib.sha256(
+                json.dumps(config, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:10]
+            run_id = f"cfg_{fingerprint}"
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.folder_name = f"run_{self.experiment_name}_{timestamp}"
+        self.folder_name = f"run_{run_id}_{timestamp}"
         self.experiment_dir = os.path.join(self.base_dir, self.folder_name)
 
         # 2. Ensure directories exist safely
@@ -55,7 +67,16 @@ class ExperimentTracker:
             df_eval (pd.DataFrame): Dataframe containing 'eventNumber', 'tob_index', 'signal', 'Type', 'truth_pt', 'tob_pt', 'tob_eta', 'tob_phi', 'nn_score'.
         """
         parquet_path = os.path.join(self.experiment_dir, "predictions.parquet")
+        try:
+            # Prefer Parquet because it is compact and fast when an engine is available.
+            df_eval.to_parquet(parquet_path, index=False, engine='auto')
+            output_path = parquet_path
+        except (ImportError, OSError) as error:
+            # Some Windows Application Control policies block PyArrow's native DLL.
+            # CSV preserves the same table and keeps the pipeline operational.
+            output_path = os.path.join(self.experiment_dir, "predictions.csv")
+            df_eval.to_csv(output_path, index=False)
+            print(f"--> Parquet unavailable ({error.__class__.__name__}); using CSV fallback.")
 
-        # Using the standard pyarrow or fastparquet engine under the hood
-        df_eval.to_parquet(parquet_path, index=False, engine='auto')
-        print(f"--> Saved test predictions to: {parquet_path}")
+        print(f"--> Saved test predictions to: {output_path}")
+        return output_path
