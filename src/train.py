@@ -5,16 +5,15 @@ import random
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import pandas as pd
 import numpy as np
 import os
 import glob
 import copy
 from pathlib import Path
 
-from features import FEATURE_REGISTRY
 from model import DynamicMLP
 from tracker import ExperimentTracker
+from training_data import TrainingDataCache
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +38,10 @@ def parse_args():
                         help="Optional CPU smoke-test limit for Signal and Background events")
     parser.add_argument("--epochs", type=int, default=None,
                         help="Optional command-line override for the configured epoch count")
+    parser.add_argument("--disable_data_cache", action="store_true",
+                        help="Disable aligned-data, split, and raw-feature reuse between configs")
+    parser.add_argument("--feature_cache_mb", type=int, default=512,
+                        help="Maximum memory used by cached raw features (default: 512 MB)")
     # Add the force flag
     parser.add_argument("--force_redo", action="store_true",
                         help="Force training even if experiment with same name and seed exists")
@@ -75,43 +78,21 @@ def get_completed_runs(base_dir="experiments"):
     return completed
 
 
-def _load_csv_for_events(csv_path, event_numbers=None):
-    """Load a full CSV, or stream-filter it for a smoke-test event subset."""
-    if event_numbers is None:
-        return pd.read_csv(csv_path)
-
-    selected_events = set(np.asarray(event_numbers).tolist())
-    filtered_chunks = []
-    for chunk in pd.read_csv(csv_path, chunksize=100_000):
-        selected = chunk[chunk["eventNumber"].isin(selected_events)]
-        if not selected.empty:
-            filtered_chunks.append(selected)
-    if not filtered_chunks:
-        raise ValueError(f"No CSV rows matched the selected events in {csv_path}")
-    return pd.concat(filtered_chunks, ignore_index=True)
-
-
-def _load_npz_arrays(npz_path, max_events, rng):
-    """Load required arrays, optionally retaining a random event subset."""
-    with np.load(npz_path) as data:
-        event_count = len(data["event_nums"])
-        if max_events is None or max_events >= event_count:
-            indices = slice(None)
-        else:
-            indices = np.sort(rng.choice(event_count, size=max_events, replace=False))
-
-        arrays = {
-            "event_nums": data["event_nums"][indices].copy(),
-            "X_tensors": data["X_tensors"][indices].copy(),
-            "X_em2_tensors": data["X_em2_tensors"][indices].copy(),
-            "X_feats": data["X_feats"][indices].copy(),
-        }
-    return arrays
+def set_random_seeds(seed):
+    """Reset model and DataLoader randomness before every experiment."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
                           experiments_dir=DEFAULT_EXPERIMENTS_DIR,
-                          max_events_per_class=None, epochs_override=None):
+                          max_events_per_class=None, epochs_override=None,
+                          data_cache=None):
     """
     This function wraps all data loading, model init, and training loops.
     """
@@ -125,156 +106,49 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     if epochs_override is not None:
         config["epochs"] = epochs_override
 
-    # Lock the seed
+    # The shared cache is supplied by main() when a config directory is used.
+    if data_cache is None:
+        data_cache = TrainingDataCache(enabled=False)
+
     seed = config.get("seed", 42)
     print(f"\n[{config.get('experiment_name')}] Locking random seed to: {seed}")
 
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-
     # =====================================================================
-    # 2. EXACT PHYSICS DATA LOADING & ALIGNMENT (From NN_Example.ipynb)
+    # 2. PHYSICS DATA PREPARATION
     # =====================================================================
-    print("Loading NPZ and CSV data...")
-    data_dir = Path(data_dir).resolve()
-    sig_csv_path = data_dir / "Signal" / "signal_combined.csv"
-    sig_npz_path = data_dir / "Signal" / "signal_combined.npz"
-    bkg_csv_path = data_dir / "Background" / "bkg_combined.csv"
-    bkg_npz_path = data_dir / "Background" / "bkg_combined.npz"
-
-    required_paths = [sig_csv_path, sig_npz_path, bkg_csv_path, bkg_npz_path]
-    missing_paths = [str(path) for path in required_paths if not path.is_file()]
-    if missing_paths:
-        raise FileNotFoundError("Missing required data files:\n" + "\n".join(missing_paths))
-
-    # Init the tracker only after validating the inputs.
-    tracker = ExperimentTracker(config, base_dir=str(Path(experiments_dir).resolve()))
-    print(f"Started experiment: {tracker.experiment_dir}")
-
-    # Load arrays and dataframes
     max_events = config.get("max_events_per_class")
-    if max_events is not None and max_events <= 0:
-        raise ValueError("max_events_per_class must be a positive integer")
-    rng = np.random.default_rng(seed)
-    npz_sig = _load_npz_arrays(sig_npz_path, max_events, rng)
-    npz_bkg = _load_npz_arrays(bkg_npz_path, max_events, rng)
-    df_sig = _load_csv_for_events(sig_csv_path, npz_sig["event_nums"] if max_events else None)
-    df_bkg = _load_csv_for_events(bkg_csv_path, npz_bkg["event_nums"] if max_events else None)
+    dataset = data_cache.get_dataset(
+        data_dir=data_dir,
+        max_events_per_class=max_events,
+        seed=seed,
+    )
+    split = data_cache.get_split(dataset, seed=seed)
 
-    if max_events:
-        print(f"Smoke-test subset: {len(npz_sig['event_nums'])} signal + "
-              f"{len(npz_bkg['event_nums'])} background events")
-
-    # Offset background events to avoid overlapping
-    ev_nums_sig = npz_sig["event_nums"]
-    ev_nums_bkg = npz_bkg["event_nums"].copy()
-    offset = 2 * ev_nums_sig.max()
-    ev_nums_bkg += offset
-    df_bkg["eventNumber"] = df_bkg["eventNumber"] + offset
-
-    # Combine tracking lists and data matrices
-    event_nums_all = np.concatenate([ev_nums_sig, ev_nums_bkg], axis=0)
-    X_tensors_all = np.concatenate([npz_sig["X_tensors"], npz_bkg["X_tensors"]], axis=0)
-    X_em2tensors_all = np.concatenate([npz_sig["X_em2_tensors"], npz_bkg["X_em2_tensors"]], axis=0)
-    X_feats_all = np.concatenate([npz_sig["X_feats"], npz_bkg["X_feats"]], axis=0)
-    df_all = pd.concat([df_sig, df_bkg], ignore_index=True)
-
-    print("Computing Relative Eta/Phi...")
-    pt = X_feats_all[:, :, 1]
-    max_idx = np.argmax(pt, axis=1)
-
-    eta_ref = X_feats_all[np.arange(len(X_feats_all)), max_idx][:, None, 2]
-    phi_ref = X_feats_all[np.arange(len(X_feats_all)), max_idx][:, None, 3]
-
-    X_feats_rel = X_feats_all.copy()
-    X_feats_rel[:, :, 2] -= eta_ref
-    X_feats_rel[:, :, 3] = (X_feats_rel[:, :, 3] - phi_ref + np.pi) % (2 * np.pi) - np.pi
-
-    print("Flattening and Aligning objects with CSV...")
-    # Flatten arrays
-    X_tens_flat = X_tensors_all.reshape(-1, 45)
-    X_feat_flat = X_feats_rel.reshape(-1, 4)
-
-    # 1. Dynamically flatten the entire EM2 3D tensor (e.g., 12x12 = 144 cells)
-    em2_spatial_size = X_em2tensors_all.shape[2] * X_em2tensors_all.shape[3]
-    X_em2_flat = X_em2tensors_all.reshape(-1, em2_spatial_size)
-
-    # Generate tracking indexes mapping back to parent events
-    groups_flat = np.repeat(event_nums_all, 6)
-    tob_index_flat = np.tile(np.arange(6), len(event_nums_all))
-
-    # Filter out invalid objects
-    csv_lookup_keys = df_all["eventNumber"].astype(str) + "_" + df_all["tob_index"].astype(str)
-    npz_lookup_keys = pd.Series(groups_flat).astype(str) + "_" + pd.Series(tob_index_flat).astype(str)
-
-    indexer = pd.Series(np.arange(len(groups_flat)), index=npz_lookup_keys)
-    valid_indices = indexer.loc[csv_lookup_keys].values
-
-    # Apply valid alignments
-    groups_aligned = groups_flat[valid_indices]
-    X_tens_aligned = X_tens_flat[valid_indices]
-    X_feat_aligned = X_feat_flat[valid_indices]
-    X_em2_aligned = X_em2_flat[valid_indices]
-
-    # **CRITICAL BRIDGE**: Map the numpy arrays directly into the master DataFrame
-    # This allows features.py to fetch them easily by column name
-    # Create list of column names dynamically
-    tensor_cols = [f'tensor_{i}' for i in range(45)]
-    feat_cols = [f'feat_{i}' for i in range(4)]
-    em2_cols = [f'em2_cell_{i}' for i in range(em2_spatial_size)]
-
-    # Create DataFrames directly from the 2D arrays, keeping the index safe!
-    df_tensors = pd.DataFrame(X_tens_aligned, columns=tensor_cols, index=df_all.index)
-    df_feats = pd.DataFrame(X_feat_aligned, columns=feat_cols, index=df_all.index)
-    df_em2 = pd.DataFrame(X_em2_aligned, columns=em2_cols, index=df_all.index)
-
-    # Concatenate everything at once
-    df_all = pd.concat([df_all, df_tensors, df_feats, df_em2], axis=1)
-
-    # Ensure standard evaluation labels exist
-    df_all['label'] = df_all['signal'].values.astype(np.float32)
-
-    # 3. Train/Val/Test Split by Unique Event IDs
-    unique_evs = np.unique(groups_aligned)
-    np.random.shuffle(unique_evs)
-
-    # 70% Train, 10% Val, 20% Test
-    train_idx = int(len(unique_evs) * 0.70)
-    val_idx = int(len(unique_evs) * 0.80)
-
-    train_evs = unique_evs[:train_idx]
-    val_evs = unique_evs[train_idx:val_idx]
-    test_evs = unique_evs[val_idx:]
-
-    train_mask = np.isin(groups_aligned, train_evs)
-    val_mask = np.isin(groups_aligned, val_evs)
-    test_mask = np.isin(groups_aligned, test_evs)
-
-    df_train = df_all[train_mask].copy().reset_index(drop=True)
-    df_val = df_all[val_mask].copy().reset_index(drop=True)
-    df_test_meta = df_all[test_mask].copy().reset_index(drop=True)
-
-    print(f"Data split ready! Train: {len(df_train)} | Val: {len(df_val)} | Test: {len(df_test_meta)}")
+    # Create the output folder only after data preparation succeeds.
+    tracker = ExperimentTracker(
+        config,
+        base_dir=str(Path(experiments_dir).resolve()),
+    )
+    print(f"Started experiment: {tracker.experiment_dir}")
+    print(
+        f"Data split ready! Train: {len(split.train)} | "
+        f"Val: {len(split.validation)} | Test: {len(split.test)}"
+    )
 
     # =====================================================================
     # 4. FEATURE ASSEMBLY & SCALING
     # =====================================================================
     print(f"Assembling features: {config['features_to_use']}")
-    train_features, val_features, test_features = [], [], []
-
-    for feature_name in config["features_to_use"]:
-        train_features.append(FEATURE_REGISTRY[feature_name](df_train))
-        val_features.append(FEATURE_REGISTRY[feature_name](df_val))
-        test_features.append(FEATURE_REGISTRY[feature_name](df_test_meta))
-
-    X_train_raw = np.hstack(train_features)
-    X_val_raw = np.hstack(val_features)
-    X_test_raw = np.hstack(test_features)
+    feature_names = config["features_to_use"]
+    X_train_raw = data_cache.assemble_features(
+        dataset, split.train, feature_names
+    )
+    X_val_raw = data_cache.assemble_features(
+        dataset, split.validation, feature_names
+    )
+    X_test_raw = data_cache.assemble_features(
+        dataset, split.test, feature_names
+    )
 
     # EXACT Normalization from your notebook
     mean = X_train_raw.mean(axis=0)
@@ -285,13 +159,19 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     X_val_np = (X_val_raw - mean) / std
     X_test_np = (X_test_raw - mean) / std
 
-    y_train_np = df_train['label'].values
-    y_val_np = df_val['label'].values
-    y_test_np = df_test_meta['label'].values
+    y_train_np = dataset.labels[split.train]
+    y_val_np = dataset.labels[split.validation]
+    y_test_np = dataset.labels[split.test]
+
+    # Experiment outputs must never mutate the shared cached DataFrame.
+    df_test_meta = (
+        dataset.frame.iloc[split.test].copy().reset_index(drop=True)
+    )
 
     # =====================================================================
     # 5. PYTORCH TRAINING
     # =====================================================================
+    set_random_seeds(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | Input Dimension: {X_train_np.shape[1]}")
 
@@ -415,6 +295,12 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
 def main():
     args = parse_args()
 
+    # One shared cache serves every configuration in this Python process.
+    data_cache = TrainingDataCache(
+        enabled=not args.disable_data_cache,
+        feature_cache_mb=args.feature_cache_mb,
+    )
+
     # 1. Determine which configs to run
     configs_to_run = []
     if args.config:
@@ -455,7 +341,10 @@ def main():
             experiments_dir=args.experiments_dir,
             max_events_per_class=args.max_events_per_class,
             epochs_override=args.epochs,
+            data_cache=data_cache,
         )
+
+    print(f"\n{data_cache.summary()}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+{
+    "epochs": 20,
+    "run_id": "c026_s42",
+    "experiment_name": "TauNet_lr0.001_bs256_arch32x16_em2_normalized_width_event_second_highest_tob_pt_event_top2_tob_dr",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        32,
+        16
+    ],
+    "features_to_use": [
+        "em2_normalized_width",
+        "event_second_highest_tob_pt",
+        "event_top2_tob_dr"
+    ],
+    "seed": 42
+}

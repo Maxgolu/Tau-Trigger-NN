@@ -34,10 +34,12 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── features.py              # Input parameters feature engineering
 │   ├── model.py                 # PyTorch implementation of the Dynamic MLP
 │   ├── tracker.py               # Experiment tracking and artifact archiving
-│   └── train.py                 # Data loading, alignment, and main training loop (receives a config file from configs/)
+│   ├── training_data.py         # Reusable data loading, alignment, event splitting, and in-memory caching
+│   └── train.py                 # Main training loop and configuration-sweep orchestration
 ├── tests/                       # Automated correctness checks for reusable project logic
 │   ├── test_distributions.py    # Distribution, event grouping, and split regression tests
-│   └── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
+│   ├── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
+│   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
 ├── Report_Plots.ipynb           # Aggregation and plotting notebook for experiment results
@@ -101,6 +103,20 @@ Standard usage is giving it a config directory, and it will generate an "experim
 python src/train.py --configs_dir configs/
 ```
 
+During a configuration sweep, aligned data, event split indices, and deterministic raw features are reused in memory. Each experiment still calculates its own training-set normalization and creates a new model, optimizer, and prediction output.
+
+The raw-feature cache is bounded to 512 MB by default. Its size can be changed with:
+
+```bash
+python src/train.py --configs_dir configs/ --feature_cache_mb 256
+```
+
+Caching can be disabled for reproducibility checks:
+
+```bash
+python src/train.py --configs_dir configs/ --disable_data_cache
+```
+
 To train only the CPU smoke test:
 
 ```bash
@@ -133,9 +149,12 @@ jupyter notebook Report_Plots.ipynb
 
 ## Core Components
 
-### 1. Data Pipeline & Neural Net Training (`src/train.py`)
+### 1. Data Pipeline & Neural Net Training (`src/training_data.py`, `src/train.py`)
 The data pipeline ingests both CSV metadata and NPZ tensor arrays from the `Signal/` and `Background/` directories.  
 * **Splitting:** The dataset is split into training (70%), validation (10%), and testing (20%) subsets. Crucially, this split is performed by isolating unique event IDs to prevent data leakage across objects within the same collision event.
+* **In-memory reuse:** During multi-configuration runs, deterministic data alignment, event splits, and raw features are reused to avoid repeated preparation work. The cache is discarded when the Python process ends.
+* **Experiment independence:** Normalization is calculated only from each training split. Models, optimizers, predictions, and evaluation results are never shared between experiments.
+* **Reproducibility:** Random seeds are reset before every model is constructed, so cache hits and configuration order do not change training results.
 
 ### 2. Feature Engineering (`src/features.py`)
 The framework leverages a feature registry to dynamically extract variables for the input vector. Key physics variables include:
