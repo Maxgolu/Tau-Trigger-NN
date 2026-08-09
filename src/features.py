@@ -50,6 +50,33 @@ def _get_tob_pt(df: pd.DataFrame) -> np.ndarray:
     return pt
 
 
+def _safe_float_divide(
+    numerator: np.ndarray,
+    denominator: np.ndarray,
+) -> np.ndarray:
+    """
+    Performs ordinary floating-point division.
+
+    This is not an FPGA approximation. The zero-denominator handling exists
+    only to prevent NaN or infinity values from entering model training.
+    Undefined ratios are assigned 0.
+    """
+    numerator = np.asarray(numerator, dtype=np.float64)
+    denominator = np.asarray(denominator, dtype=np.float64)
+
+    result = np.zeros(
+        np.broadcast_shapes(numerator.shape, denominator.shape),
+        dtype=np.float64,
+    )
+    np.divide(
+        numerator,
+        denominator,
+        out=result,
+        where=np.abs(denominator) > 1e-12,
+    )
+    return result.astype(np.float32)
+
+
 def _all_3x3_window_sums(em2_3d: np.ndarray) -> np.ndarray:
     """
     Computes sums of all possible 3x3 windows inside each 12x12 EM2 matrix.
@@ -126,22 +153,24 @@ def get_all_em2_144(df: pd.DataFrame) -> np.ndarray:
 
 def get_em2_best_3x3_fraction(df: pd.DataFrame) -> np.ndarray:
     """
-    Feature:
-        strongest 3x3 EM2 window / total EM2 energy
+    Calculates the fraction of the total 12x12 EM2 energy contained in its
+    strongest 3x3 window:
 
-    Physics meaning:
-        Measures how concentrated the EM2 shower is in the strongest local region.
-        A high value means most of the EM2 energy is localized in one compact area.
+        strongest_3x3_energy / total_EM2_energy
+
+    This uses ordinary floating-point division, without an FPGA approximation.
+
+    Empirical note for the current dataset:
+        This feature is particularly informative from approximately 20 GeV
+        upward and remains useful in the 40-120 GeV region.
     """
     em2_3d = _get_em2_matrix(df)
 
     total_em2 = em2_3d.sum(axis=(1, 2)).reshape(-1, 1)
-    total_em2 = np.where(total_em2 == 0, 1e-8, total_em2)
-
     window_sums = _all_3x3_window_sums(em2_3d)
     best_3x3 = window_sums.max(axis=(1, 2)).reshape(-1, 1)
 
-    return best_3x3 / total_em2
+    return _safe_float_divide(best_3x3, total_em2)
 
 
 def get_em2_outside_best_3x3_over_pt(df: pd.DataFrame) -> np.ndarray:
@@ -420,6 +449,72 @@ def get_em2_width(df: pd.DataFrame) -> np.ndarray:
     return widths
 
 
+def get_em2_normalized_width(df: pd.DataFrame) -> np.ndarray:
+    """
+    Calculates the energy-weighted squared distance from the maximum-energy
+    EM2 cell, divided by the total energy in the 12x12 EM2 matrix:
+
+        sum_i(E_i * d_i^2) / sum_i(E_i)
+
+    This uses ordinary floating-point division, without an FPGA approximation.
+
+    Empirical note for the current dataset:
+        This feature separates tau and noise objects across all tested pT
+        ranges, with its strongest separation approximately in the
+        40-120 GeV region.
+    """
+    em2_3d = _get_em2_matrix(df)
+
+    weighted_width = get_em2_width(df)
+    total_em2_energy = em2_3d.sum(axis=(1, 2)).reshape(-1, 1)
+
+    return _safe_float_divide(weighted_width, total_em2_energy)
+
+
+def get_em2_3x3_normalized_dominance(df: pd.DataFrame) -> np.ndarray:
+    """
+    Calculates normalized dominance in the 3x3 EM2 layer:
+
+        dominance / layer_sum
+        = (max_cell - sum_of_other_cells) / layer_sum
+
+    This uses ordinary floating-point division, without an FPGA approximation.
+
+    Empirical note for the current dataset:
+        Its separation improves at medium and high pT, especially from roughly
+        20 GeV upward. It is less informative in the lowest pT interval.
+    """
+    all_layers = get_5_layers_3x3(df)
+    em2_3x3 = all_layers[:, 2, :, :]
+
+    dominance = get_core_dominance(em2_3x3)
+    layer_sum = get_layer_sum(em2_3x3)
+
+    return _safe_float_divide(dominance, layer_sum)
+
+
+def get_em2_3x3_sum_over_tob_pt(df: pd.DataFrame) -> np.ndarray:
+    """
+    Calculates the total energy in the 3x3 EM2 layer divided by TOB pT:
+
+        EM2_3x3_sum / tob_pt
+
+    This uses ordinary floating-point division, without an FPGA approximation.
+
+    Empirical note for the current dataset:
+        This feature is most informative in the low-pT region, particularly
+        around 5-10 GeV. Its independent separation becomes substantially
+        weaker at higher pT.
+    """
+    all_layers = get_5_layers_3x3(df)
+    em2_3x3 = all_layers[:, 2, :, :]
+
+    layer_sum = get_layer_sum(em2_3x3)
+    tob_pt = _get_tob_pt(df)
+
+    return _safe_float_divide(layer_sum, tob_pt)
+
+
 # --- Division Approximations (FPGA Safe) ---
 
 def get_frach_approx(df: pd.DataFrame) -> np.ndarray:
@@ -575,6 +670,161 @@ def get_em2_6x6_maxdist(df: pd.DataFrame) -> np.ndarray:
 
     return distances
 
+
+# --- Event Context Features ---
+
+def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates event-level quantities using only observable TOB information.
+
+    No truth label, signal column, or event tau count is used. Therefore these
+    features are available at inference time and do not introduce truth leakage.
+    """
+    required_columns = {
+        "eventNumber",
+        "tob_index",
+        "tob_pt",
+        "tob_eta",
+        "tob_phi",
+    }
+    missing = required_columns.difference(df.columns)
+    if missing:
+        raise KeyError(
+            f"Cannot calculate event features; missing columns: {sorted(missing)}"
+        )
+
+    ranked = df[
+        ["eventNumber", "tob_index", "tob_pt", "tob_eta", "tob_phi"]
+    ].copy()
+
+    # Stable tie-breaking makes the result reproducible when two objects have
+    # exactly the same tob_pt.
+    ranked = ranked.sort_values(
+        ["eventNumber", "tob_pt", "tob_index"],
+        ascending=[True, False, True],
+        kind="mergesort",
+    )
+    ranked["pt_rank"] = ranked.groupby(
+        "eventNumber", sort=False
+    ).cumcount()
+
+    event_ids = pd.Index(
+        df["eventNumber"].drop_duplicates(),
+        name="eventNumber",
+    )
+    context = pd.DataFrame(index=event_ids)
+
+    context["event_sum_tob_pt"] = (
+        df.groupby("eventNumber", sort=False)["tob_pt"]
+        .sum()
+        .reindex(event_ids)
+    )
+
+    first = ranked[ranked["pt_rank"].eq(0)].set_index("eventNumber")
+    second = ranked[ranked["pt_rank"].eq(1)].set_index("eventNumber")
+
+    context["event_second_highest_tob_pt"] = (
+        second["tob_pt"].reindex(event_ids).fillna(0.0)
+    )
+
+    delta_eta = first["tob_eta"] - second["tob_eta"]
+
+    # Correct periodic angular distance in phi, restricted to [-pi, pi].
+    delta_phi = (
+        first["tob_phi"] - second["tob_phi"] + np.pi
+    ) % (2.0 * np.pi) - np.pi
+
+    top2_dr = np.sqrt(delta_eta**2 + delta_phi**2)
+
+    context["event_top2_tob_dr"] = (
+        top2_dr.reindex(event_ids).fillna(0.0)
+    )
+
+    return context.astype(np.float32)
+
+
+def _broadcast_event_context(
+    df: pd.DataFrame,
+    feature_names: list[str],
+) -> np.ndarray:
+    """
+    Broadcasts event-level values back to the object rows.
+
+    Output row i always corresponds to input DataFrame row i.
+    """
+    context = _build_event_context_table(df)
+
+    return context.loc[
+        df["eventNumber"].to_numpy(),
+        feature_names,
+    ].to_numpy(dtype=np.float32)
+
+
+def get_event_sum_tob_pt(df: pd.DataFrame) -> np.ndarray:
+    """
+    Returns the sum of tob_pt over all objects in the candidate's event.
+
+    Empirical note for the current dataset:
+        This is a very strong event-level separator. For identifying events
+        containing at least two tau objects, its measured AUC was approximately
+        0.96. It must still be tested for dependence on dataset energy spectra.
+    """
+    return _broadcast_event_context(
+        df,
+        ["event_sum_tob_pt"],
+    )
+
+
+def get_event_second_highest_tob_pt(df: pd.DataFrame) -> np.ndarray:
+    """
+    Returns the second-highest tob_pt in the candidate's event.
+
+    Empirical note for the current dataset:
+        This is also a strong event-level separator, with an event-level AUC
+        of approximately 0.95. It is strongly correlated with event_sum_tob_pt,
+        so the two should first be tested separately.
+    """
+    return _broadcast_event_context(
+        df,
+        ["event_second_highest_tob_pt"],
+    )
+
+
+def get_event_top2_tob_dr(df: pd.DataFrame) -> np.ndarray:
+    """
+    Returns Delta-R between the two highest-tob_pt objects in the event:
+
+        Delta-R = sqrt(Delta-eta^2 + Delta-phi^2)
+
+    Empirical note for the current dataset:
+        This feature is weaker by itself than the two energy features, but it
+        is much less correlated with them and may provide complementary event
+        geometry information.
+    """
+    return _broadcast_event_context(
+        df,
+        ["event_top2_tob_dr"],
+    )
+
+
+def get_event_context_core(df: pd.DataFrame) -> np.ndarray:
+    """
+    Efficient three-dimensional event-context vector:
+
+        [sum tob_pt, second-highest tob_pt, top-two Delta-R]
+
+    Use this registry entry when all three event features are required.
+    The event ranking is then calculated only once.
+    """
+    return _broadcast_event_context(
+        df,
+        [
+            "event_sum_tob_pt",
+            "event_second_highest_tob_pt",
+            "event_top2_tob_dr",
+        ],
+    )
+
 FEATURE_REGISTRY = {
     # --- Original Features ---
     "core_physics": get_core_physics,
@@ -585,6 +835,7 @@ FEATURE_REGISTRY = {
     "em2_max_neighbors_sum": get_em2_max_neighbors_sum,
     "em2_all_cells": get_all_em2_144,
     "em2_best_3x3_fraction": get_em2_best_3x3_fraction,
+    "em2_normalized_width": get_em2_normalized_width,
     "em2_outside_best_3x3_over_pt": get_em2_outside_best_3x3_over_pt,
     "em2_top3_3x3_features": get_em2_top3_3x3_features,
 
@@ -602,6 +853,8 @@ FEATURE_REGISTRY = {
     "em2_3x3_dominance": lambda df: extract_specific_feature(df, 2, get_core_dominance),
     "em2_3x3_sparsity": lambda df: extract_specific_feature(df, 2, get_dynamic_sparsity),
     "em2_3x3_sum": lambda df: extract_specific_feature(df, 2, get_layer_sum),
+    "em2_3x3_normalized_dominance": get_em2_3x3_normalized_dominance,
+    "em2_3x3_sum_over_tob_pt": get_em2_3x3_sum_over_tob_pt,
 
     # --- EM3 ---
     "em3_dominance": lambda df: extract_specific_feature(df, 3, get_core_dominance),
@@ -631,6 +884,12 @@ FEATURE_REGISTRY = {
     # --- trying more distance variants ---
     "em2_top2_3x3_sqdist": get_em2_top2_3x3_sqdist,
     "em2_6x6_maxdist": get_em2_6x6_maxdist,
+
+    # --- Event Context Features ---
+    "event_sum_tob_pt": get_event_sum_tob_pt,
+    "event_second_highest_tob_pt": get_event_second_highest_tob_pt,
+    "event_top2_tob_dr": get_event_top2_tob_dr,
+    "event_context_core": get_event_context_core,
 
     "tob_pt_only": _get_tob_pt,
 }

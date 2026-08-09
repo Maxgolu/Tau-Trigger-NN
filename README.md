@@ -23,17 +23,22 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 ├── Background/                  # Simulated background data (.csv and .npz files)
 ├── Signal/                      # Simulated tau signal data (.csv and .npz files)
 ├── configs/                     # Automatically generated JSON files that determine a neural net training parameters (input parameters, structure, training hyperparameters etc)
+│   └── distributions/           # JSON definitions for distribution analyses
 ├── experiments/                 # Contains "experiment" folders. Every trained neural net has an "experiment" folder with the model weights, predictions, and metrics. Currently contains all trained neural nets organized by "batches".
+├── analysis_outputs/            # Generated research-analysis outputs (ignored by Git)
+│   └── distributions/           # Feature histograms and split-audit tables
 ├── Reserach results data/       # Analyzed neural net results (graphs, testing evaluation)
 ├── src/                         # Main code files. Use with --help flag for detailed usage explanation.
+│   ├── distributions/           # Modular object/event distribution analysis and split auditing
 │   ├── evaluate.py              # Generates evaluation results for trained neural nets (Fake Rate calculations, binned efficiencies, and Fermi-Dirac fitting)
 │   ├── features.py              # Input parameters feature engineering
 │   ├── model.py                 # PyTorch implementation of the Dynamic MLP
 │   ├── tracker.py               # Experiment tracking and artifact archiving
 │   └── train.py                 # Data loading, alignment, and main training loop (receives a config file from configs/)
 ├── tests/                       # Automated correctness checks for reusable project logic
+│   ├── test_distributions.py    # Distribution, event grouping, and split regression tests
 │   └── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
-├── generate_configs.py          # Script to automatically generate JSON config file for congis/
+├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
 ├── Report_Plots.ipynb           # Aggregation and plotting notebook for experiment results
 ├── Report_Plots - Batch 3...    # Focused evaluation notebook for later experiment batches
@@ -47,6 +52,14 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 ### Step 0: Designing a testing batch
 
 Decide on what testing you want to do - specifically, which features (the neural net input vector parameters) and what hidden layer architecture.
+
+Feature distributions can optionally be generated before designing a batch:
+
+```bash
+python -m src.distributions.run --config configs/distributions/core_v1.json
+```
+
+This produces object-level, event-level and pT-conditioned histograms under `analysis_outputs/distributions/`. The same framework can audit the 70/10/20 event split over multiple seeds.
 
 ### Step 1: Generate Configuration Sweep
 The generation script creates lists of values for: epoches amount, learning rates, batch sizes, architectures, and feature_ests and seeds.
@@ -67,6 +80,18 @@ For one lightweight CPU smoke-test configuration:
 ```bash
 python generate_configs.py --smoke-test
 ```
+
+Custom feature sets and seeds can be supplied without editing the script. Commas combine features within one network, while repeating `--feature-set` creates separate experiment families:
+
+```bash
+python generate_configs.py --output-dir configs/event_features_v1 \
+  --feature-set "event_sum_tob_pt" \
+  --feature-set "event_second_highest_tob_pt" \
+  --feature-set "em2_normalized_width,event_sum_tob_pt" \
+  --seeds 42 123 456
+```
+
+This example creates nine configurations: three feature sets evaluated with three random seeds. The available generator options are `--feature-set`, `--seeds`, `--output-dir`, and `--smoke-test`.
 
 ### Step 2: Train the Network
 Main training script. 
@@ -117,6 +142,9 @@ The framework leverages a feature registry to dynamically extract variables for 
 The config files uses the registry naming scheme to decide which specific features it wants to give for the input vectors, and the trian.py code uses this registry for name resolution.
 Each feature is defined as a function that receives a dataframe containing all the data, and can parse out exactly what it wants. 
 * **Important Note:** The returned value from each feature function is a list of results, as it calculates the feature for the entire batch at once. 
+* **Normalized shower features:** `em2_normalized_width`, `em2_3x3_normalized_dominance`, `em2_3x3_sum_over_tob_pt`, and `em2_best_3x3_fraction` use ordinary floating-point division. Exact zero denominators are mapped to zero to avoid invalid model inputs.
+* **Event context:** `event_sum_tob_pt`, `event_second_highest_tob_pt`, and `event_top2_tob_dr` are calculated from observable TOB data and broadcast to every object in the event. `event_context_core` returns all three values together.
+* **Leakage protection:** Event features do not use truth labels or tau multiplicity. Background event IDs are separated from signal IDs, and complete events remain within one train, validation, or test subset.
 
 ### 3. Model Architecture (`src/model.py`)
 Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron built with `torch.nn`.  

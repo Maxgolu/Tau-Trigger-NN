@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 
 experiments/
+analysis_outputs/
 
 Background/*.csv
 Background/*.npz

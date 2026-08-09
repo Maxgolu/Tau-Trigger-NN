@@ -1,0 +1,151 @@
+{
+  "run_id": "dist_core_v1",
+  "data_scope": "train",
+  "seed": 42,
+  "normalization": "probability",
+  "output_formats": ["png"],
+  "show_plots": false,
+  "object_batch_size": 100000,
+  "pt_conditioning": {
+    "enabled": true,
+    "bins_gev": [5, 10, 20, 40, 80, 120]
+  },
+  "object_plots": [
+    {
+      "id": "tob_pt_overall_low",
+      "variable": "tob_pt",
+      "group_by": "object_label",
+      "options": {"range": [5, 120], "bins": 58, "title": "TOB pT: tau objects versus noise objects"}
+    },
+    {
+      "id": "tob_pt_overall_full",
+      "variable": "tob_pt",
+      "group_by": "object_label",
+      "options": {"range": [5, 410], "bins": 70, "log_x": true, "log_y": true, "title": "Full TOB pT distribution"}
+    },
+    {
+      "id": "tob_pt_by_event_tau_count_low",
+      "variable": "tob_pt",
+      "group_by": "object_label_and_event_tau_count",
+      "options": {"range": [5, 120], "bins": 58, "title": "TOB pT by object label and event tau multiplicity"}
+    },
+    {
+      "id": "tob_pt_by_event_tau_count_full",
+      "variable": "tob_pt",
+      "group_by": "object_label_and_event_tau_count",
+      "options": {"range": [5, 410], "bins": 70, "log_x": true, "log_y": true, "title": "Full TOB pT by event tau multiplicity"}
+    },
+    {
+      "id": "em2_maxdist",
+      "variable": "em2_maxdist",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [0, 242], "title": "EM2 top-two-cell squared distance"}
+    },
+    {
+      "id": "em2_3x3_maxdist",
+      "variable": "em2_3x3_maxdist",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [0, 8], "title": "EM2 3x3 top-two-cell squared distance"}
+    },
+    {
+      "id": "em2_3x3_dominance",
+      "variable": "em2_3x3_dominance",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"clip_quantiles": [0.001, 0.999], "title": "Raw EM2 3x3 dominance"}
+    },
+    {
+      "id": "em2_3x3_normalized_dominance",
+      "variable": "em2_3x3_normalized_dominance",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [-1, 1], "title": "Normalized EM2 3x3 dominance"}
+    },
+    {
+      "id": "em2_3x3_sum",
+      "variable": "em2_3x3_sum",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"clip_quantiles": [0.001, 0.999], "title": "EM2 3x3 energy sum"}
+    },
+    {
+      "id": "em2_3x3_sum_over_tob_pt",
+      "variable": "em2_3x3_sum_over_tob_pt",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"clip_quantiles": [0.001, 0.999], "title": "EM2 3x3 energy sum divided by TOB pT"}
+    },
+    {
+      "id": "em2_3x3_sparsity",
+      "variable": "em2_3x3_sparsity",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [0, 9], "title": "EM2 3x3 active-cell count"}
+    },
+    {
+      "id": "em2_width",
+      "variable": "em2_width",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"clip_quantiles": [0.001, 0.999], "title": "Raw EM2 energy-weighted width"}
+    },
+    {
+      "id": "em2_normalized_width",
+      "variable": "em2_normalized_width",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [0, 50], "title": "Normalized EM2 energy-weighted width"}
+    },
+    {
+      "id": "em2_best_3x3_fraction",
+      "variable": "em2_best_3x3_fraction",
+      "group_by": "object_label",
+      "pt_conditioned": true,
+      "options": {"range": [0, 1], "title": "Energy fraction in the best EM2 3x3 window"}
+    }
+  ],
+  "event_plots": [
+    {
+      "id": "top2_tob_dr2",
+      "variable": "top2_tob_dr2",
+      "group_by": "event_tau_count",
+      "options": {"range": [0, 35], "bins": 60, "title": "Squared angular distance between the two highest-pT TOBs"}
+    },
+    {
+      "id": "top2_tob_dr",
+      "variable": "top2_tob_dr",
+      "group_by": "event_tau_count",
+      "options": {"range": [0, 6], "bins": 60, "title": "Angular distance between the two highest-pT TOBs"}
+    },
+    {
+      "id": "second_highest_tob_pt_low",
+      "variable": "second_highest_tob_pt",
+      "group_by": "event_tau_count",
+      "options": {"range": [5, 120], "bins": 58, "title": "Second-highest TOB pT"}
+    },
+    {
+      "id": "second_highest_tob_pt_full",
+      "variable": "second_highest_tob_pt",
+      "group_by": "event_tau_count",
+      "options": {"range": [5, 410], "bins": 70, "log_x": true, "log_y": true, "title": "Full second-highest TOB pT distribution"}
+    },
+    {
+      "id": "sum_event_tob_pt_low",
+      "variable": "sum_event_tob_pt",
+      "group_by": "event_tau_count",
+      "options": {"range": [0, 500], "bins": 60, "title": "Event sum of TOB pT"}
+    },
+    {
+      "id": "sum_event_tob_pt_full",
+      "variable": "sum_event_tob_pt",
+      "group_by": "event_tau_count",
+      "options": {"range": [5, 2500], "bins": 75, "log_x": true, "log_y": true, "title": "Full event sum of TOB pT distribution"}
+    }
+  ],
+  "split_audit": {
+    "enabled": true,
+    "seeds": [42, 123, 456]
+  }
+}

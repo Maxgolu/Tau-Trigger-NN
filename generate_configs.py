@@ -21,6 +21,22 @@ def parse_args():
         action="store_true",
         help="Generate one lightweight CPU configuration instead of the full sweep.",
     )
+    parser.add_argument(
+        "--feature-set",
+        action="append",
+        default=None,
+        help=(
+            "Comma-separated feature names. Repeat this argument to generate "
+            "multiple feature combinations."
+        ),
+    )
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=[42, 123, 456],
+        help="Random seeds for every requested feature set.",
+    )
     return parser.parse_args()
 
 
@@ -49,19 +65,25 @@ def generate_smoke_config(output_dir=DEFAULT_CONFIG_DIR):
     print(f"Generated smoke-test configuration: {filepath}")
 
 
-def generate_sweep_configs(output_dir=DEFAULT_CONFIG_DIR):
+def generate_sweep_configs(
+    output_dir=DEFAULT_CONFIG_DIR,
+    feature_sets=None,
+    seeds=None,
+):
     base_config = {"epochs": 20}
     learning_rates = [0.001]
     batch_sizes = [256]
     architectures = [[32, 16]]
-    feature_sets = [
-        ["tob_pt_only"],
-        ["em2_3x3_maxdist", "tob_pt_only"],
-        ["em2_3x3_dominance", "tob_pt_only"],
-        ["em2_3x3_dominance", "em2_3x3_maxdist"],
-        ["em2_3x3_dominance", "em2_3x3_maxdist", "tob_pt_only"],
-    ]
-    seeds = [42, 123, 456]
+    if feature_sets is None:
+        feature_sets = [
+            ["tob_pt_only"],
+            ["em2_3x3_maxdist", "tob_pt_only"],
+            ["em2_3x3_dominance", "tob_pt_only"],
+            ["em2_3x3_dominance", "em2_3x3_maxdist"],
+            ["em2_3x3_dominance", "em2_3x3_maxdist", "tob_pt_only"],
+        ]
+    if seeds is None:
+        seeds = [42, 123, 456]
 
     output_dir = Path(output_dir)
     count = 0
@@ -97,4 +119,17 @@ if __name__ == "__main__":
     if args.smoke_test:
         generate_smoke_config(args.output_dir)
     else:
-        generate_sweep_configs(args.output_dir)
+        requested_feature_sets = None
+        if args.feature_set:
+            requested_feature_sets = [
+                [name.strip() for name in feature_set.split(",") if name.strip()]
+                for feature_set in args.feature_set
+            ]
+            if any(not feature_set for feature_set in requested_feature_sets):
+                raise ValueError("Each --feature-set must contain at least one feature name.")
+
+        generate_sweep_configs(
+            output_dir=args.output_dir,
+            feature_sets=requested_feature_sets,
+            seeds=args.seeds,
+        )
