@@ -673,12 +673,11 @@ def get_em2_6x6_maxdist(df: pd.DataFrame) -> np.ndarray:
 
 # --- Event Context Features ---
 
-def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
+def _rank_event_objects(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculates event-level quantities using only observable TOB information.
+    Ranks the observable TOBs in each event by tob_pt.
 
-    No truth label, signal column, or event tau count is used. Therefore these
-    features are available at inference time and do not introduce truth leakage.
+    tob_index provides deterministic tie-breaking when tob_pt values are equal.
     """
     required_columns = {
         "eventNumber",
@@ -690,7 +689,7 @@ def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
     missing = required_columns.difference(df.columns)
     if missing:
         raise KeyError(
-            f"Cannot calculate event features; missing columns: {sorted(missing)}"
+            f"Cannot rank event objects; missing columns: {sorted(missing)}"
         )
 
     ranked = df[
@@ -707,6 +706,18 @@ def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
     ranked["pt_rank"] = ranked.groupby(
         "eventNumber", sort=False
     ).cumcount()
+
+    return ranked
+
+
+def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculates event-level quantities using only observable TOB information.
+
+    No truth label, signal column, or event tau count is used. Therefore these
+    features are available at inference time and do not introduce truth leakage.
+    """
+    ranked = _rank_event_objects(df)
 
     event_ids = pd.Index(
         df["eventNumber"].drop_duplicates(),
@@ -741,6 +752,103 @@ def _build_event_context_table(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     return context.astype(np.float32)
+
+
+def get_object_reference_tob_dr2(df: pd.DataFrame) -> np.ndarray:
+    """
+    Returns an object-specific squared angular distance.
+
+    Non-leading objects are measured relative to the highest-tob_pt object.
+    The leading object is measured relative to the second-highest object.
+    """
+    ranked = _rank_event_objects(df)
+
+    first = ranked[ranked["pt_rank"].eq(0)].set_index("eventNumber")
+    second = ranked[ranked["pt_rank"].eq(1)].set_index("eventNumber")
+
+    event_ids = df["eventNumber"].to_numpy()
+
+    leading_index = first["tob_index"].reindex(event_ids).to_numpy()
+    leading_eta = first["tob_eta"].reindex(event_ids).to_numpy()
+    leading_phi = first["tob_phi"].reindex(event_ids).to_numpy()
+
+    second_eta = second["tob_eta"].reindex(event_ids).to_numpy()
+    second_phi = second["tob_phi"].reindex(event_ids).to_numpy()
+
+    is_leading = df["tob_index"].to_numpy() == leading_index
+
+    reference_eta = np.where(is_leading, second_eta, leading_eta)
+    reference_phi = np.where(is_leading, second_phi, leading_phi)
+
+    delta_eta = df["tob_eta"].to_numpy() - reference_eta
+    delta_phi = (
+        df["tob_phi"].to_numpy() - reference_phi + np.pi
+    ) % (2.0 * np.pi) - np.pi
+
+    distance_squared = delta_eta**2 + delta_phi**2
+
+    # A single-object event has no available reference object.
+    distance_squared = np.where(
+        np.isfinite(distance_squared),
+        distance_squared,
+        0.0,
+    )
+
+    return distance_squared.reshape(-1, 1).astype(np.float32)
+
+
+def get_object_partner_context(df: pd.DataFrame) -> np.ndarray:
+    """
+    Returns compact object and partner kinematics.
+
+    The partner is the highest-tob_pt object other than the current object.
+    The four columns are log object pT, log partner pT, azimuthal
+    acoplanarity, and absolute eta separation.
+    """
+    ranked = _rank_event_objects(df)
+
+    first = ranked[ranked["pt_rank"].eq(0)].set_index("eventNumber")
+    second = ranked[ranked["pt_rank"].eq(1)].set_index("eventNumber")
+
+    event_ids = df["eventNumber"].to_numpy()
+
+    leading_index = first["tob_index"].reindex(event_ids).to_numpy()
+    leading_pt = first["tob_pt"].reindex(event_ids).to_numpy()
+    leading_eta = first["tob_eta"].reindex(event_ids).to_numpy()
+    leading_phi = first["tob_phi"].reindex(event_ids).to_numpy()
+
+    second_pt = second["tob_pt"].reindex(event_ids).to_numpy()
+    second_eta = second["tob_eta"].reindex(event_ids).to_numpy()
+    second_phi = second["tob_phi"].reindex(event_ids).to_numpy()
+
+    is_leading = df["tob_index"].to_numpy() == leading_index
+
+    partner_pt = np.where(is_leading, second_pt, leading_pt)
+    partner_eta = np.where(is_leading, second_eta, leading_eta)
+    partner_phi = np.where(is_leading, second_phi, leading_phi)
+
+    object_pt = df["tob_pt"].to_numpy(dtype=float)
+    delta_eta = np.abs(df["tob_eta"].to_numpy() - partner_eta)
+    delta_phi = np.abs(
+        (df["tob_phi"].to_numpy() - partner_phi + np.pi)
+        % (2.0 * np.pi)
+        - np.pi
+    )
+    acoplanarity = np.pi - delta_phi
+
+    has_partner = np.isfinite(partner_pt)
+    partner_pt = np.where(has_partner, partner_pt, 0.0)
+    delta_eta = np.where(has_partner, delta_eta, 0.0)
+    acoplanarity = np.where(has_partner, acoplanarity, np.pi)
+
+    # TOB pT is non-negative. log1p reduces its long dynamic range before the
+    # standard training-set normalization is applied.
+    object_log_pt = np.log1p(np.maximum(object_pt, 0.0))
+    partner_log_pt = np.log1p(np.maximum(partner_pt, 0.0))
+
+    return np.column_stack(
+        [object_log_pt, partner_log_pt, acoplanarity, delta_eta]
+    ).astype(np.float32)
 
 
 def _broadcast_event_context(
@@ -890,6 +998,10 @@ FEATURE_REGISTRY = {
     "event_second_highest_tob_pt": get_event_second_highest_tob_pt,
     "event_top2_tob_dr": get_event_top2_tob_dr,
     "event_context_core": get_event_context_core,
+
+    # --- Object-Specific Event Geometry ---
+    "object_reference_tob_dr2": get_object_reference_tob_dr2,
+    "object_partner_context": get_object_partner_context,
 
     "tob_pt_only": _get_tob_pt,
 }

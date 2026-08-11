@@ -39,6 +39,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 ├── tests/                       # Automated correctness checks for reusable project logic
 │   ├── test_distributions.py    # Distribution, event grouping, and split regression tests
 │   ├── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
+│   ├── test_features.py         # Object-specific geometry and feature regression tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
@@ -163,6 +164,7 @@ Each feature is defined as a function that receives a dataframe containing all t
 * **Important Note:** The returned value from each feature function is a list of results, as it calculates the feature for the entire batch at once. 
 * **Normalized shower features:** `em2_normalized_width`, `em2_3x3_normalized_dominance`, `em2_3x3_sum_over_tob_pt`, and `em2_best_3x3_fraction` use ordinary floating-point division. Exact zero denominators are mapped to zero to avoid invalid model inputs.
 * **Event context:** `event_sum_tob_pt`, `event_second_highest_tob_pt`, and `event_top2_tob_dr` are calculated from observable TOB data and broadcast to every object in the event. `event_context_core` returns all three values together.
+* **Object-specific event geometry:** `object_reference_tob_dr2` returns squared angular distance to the highest-`tob_pt` object. The leading object instead uses the second-highest object as its reference. `object_partner_context` returns log object and partner `tob_pt`, azimuthal acoplanarity, and absolute eta separation using the same partner rule.
 * **Leakage protection:** Event features do not use truth labels or tau multiplicity. Background event IDs are separated from signal IDs, and complete events remain within one train, validation, or test subset.
 
 ### 3. Model Architecture (`src/model.py`)
@@ -175,6 +177,8 @@ The evaluation script operates on the `predictions.parquet` files generated duri
 * Converts kinematic constraints (like `tob_pt` and `truth_pt`) from MeV to GeV.  
 * Calibrates each score threshold at the event level. For the two-object trigger, an event passes when at least two objects satisfy `score >= threshold`; equivalently, the threshold is compared with the event's second-highest object score.
 * Selects the lowest deterministic threshold whose measured background Fake Rate does not exceed the requested target (e.g., 0.005, 0.010, 0.020). Equal scores are kept together, so a discrete model may achieve a lower Fake Rate when the exact target is unattainable.
-* Recalculates the final Fake Rate with the same `>=` rule used by the efficiency curve and saves it under `achieved_fake_rates` in `metrics.json`. Legacy metrics without this verification are not included in multi-seed averages.
-* Bins the signal data across 44 segments to calculate binomial efficiencies and maps them to a Fermi-Dirac function via `scipy.optimize.curve_fit` to extract the midpoint, slope, and plateau.  
-* Multi-seed experiments are automatically aggregated and averaged to compute stable statistical metrics.  
+* Applies threshold calibration and efficiency cuts with the same float64 `>=` comparison, including for tied discrete scores, and saves the measured rate under `achieved_fake_rates` in `metrics.json`.
+* Measures efficiency only on truth-matched tau objects (`Type == "Signal"` and `signal == 1`), excluding noise objects contained in signal events.
+* Bins the truth-matched tau data across 44 segments to calculate binomial efficiencies and maps them to a Fermi-Dirac function via `scipy.optimize.curve_fit` to extract the midpoint, slope, and plateau.
+* Adds a black `tob_pt` baseline to every turn-on plot, calibrated independently on the same test events and target Fake Rate.
+* Multi-seed experiments are automatically aggregated, including their independently calibrated `tob_pt` baselines, to compute stable statistical metrics.

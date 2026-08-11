@@ -86,6 +86,27 @@ def CalcThresh(DF, Criteria, FakeRate, objects=2):
     event_scores, event_count = build_event_trigger_scores(DF, Criteria, objects)
     return select_fpr_threshold(event_scores, event_count, FakeRate)
 
+
+def select_truth_tau_objects(df):
+    """Return only objects that are truth-matched to a tau.
+
+    The Signal sample also contains non-tau objects, so its sample name alone
+    is not an object label.
+    """
+    required = {"Type", "signal"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise KeyError(f"Missing required columns: {sorted(missing)}")
+    return df.loc[(df["Type"] == "Signal") & (df["signal"] == 1)]
+
+
+def score_pass_mask(df, criterion, threshold):
+    """Apply the final score cut with the calibration numeric precision."""
+    if criterion not in df.columns:
+        raise KeyError(f"Missing required column: {criterion}")
+    scores = df[criterion].to_numpy(dtype=np.float64)
+    return np.isfinite(scores) & (scores >= np.float64(threshold))
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Tau Particle NN Predictions")
     parser.add_argument("--experiment_dir", type=str, default=None,
@@ -112,6 +133,87 @@ def fermi_dirac(x, plateau, slope, midpoint):
     return plateau / (1.0 + np.exp(-np.clip(slope * (x - midpoint), -500, 500)))
 
 
+def calculate_binned_efficiencies(
+    signal_df, criterion, threshold, eval_bins, bin_var
+):
+    """Measure object efficiency in fixed bins using the shared score cut."""
+    efficiencies = []
+    errors = []
+    for b_min, b_max in zip(eval_bins[:-1], eval_bins[1:]):
+        bin_signal = signal_df[
+            (signal_df[bin_var] >= b_min) & (signal_df[bin_var] < b_max)
+        ]
+        denominator = len(bin_signal)
+        if denominator > 0:
+            passed = np.count_nonzero(
+                score_pass_mask(bin_signal, criterion, threshold)
+            )
+            efficiency = passed / denominator
+            error = np.sqrt(
+                efficiency * (1.0 - efficiency) / denominator
+            )
+            if error == 0.0:
+                error = 1e-5
+        else:
+            efficiency = 0.0
+            error = 1.0
+
+        efficiencies.append(float(efficiency))
+        errors.append(float(error))
+
+    return efficiencies, errors
+
+
+def fit_binned_efficiencies(bin_centers, efficiencies, errors):
+    """Fit the standard inverse Fermi-Dirac turn-on model."""
+    try:
+        p0 = [1.0, 0.1, 40.0]
+        bounds = ([0.0, 0.0, 0.0], [1.0, np.inf, 300.0])
+        popt, _ = curve_fit(
+            fermi_dirac,
+            bin_centers,
+            efficiencies,
+            p0=p0,
+            bounds=bounds,
+            sigma=errors,
+            absolute_sigma=True,
+        )
+        plateau, slope, midpoint = popt
+
+        observed = np.asarray(efficiencies)
+        uncertainty = np.asarray(errors)
+        fitted = fermi_dirac(bin_centers, plateau, slope, midpoint)
+        valid = uncertainty < 1.0
+        degrees_of_freedom = np.sum(valid) - len(popt)
+        if degrees_of_freedom > 0:
+            chi2_value = np.sum(
+                ((observed[valid] - fitted[valid]) / uncertainty[valid]) ** 2
+            )
+            chi2_reduced = chi2_value / degrees_of_freedom
+            p_value = chi2.sf(chi2_value, degrees_of_freedom)
+        else:
+            chi2_reduced, p_value = 0.0, 0.0
+
+        return {
+            "fit_success": True,
+            "plateau": float(plateau),
+            "slope": float(slope),
+            "midpoint": float(midpoint),
+            "chi2_red": float(chi2_reduced),
+            "p_value": float(p_value),
+        }
+    except Exception as error:
+        return {
+            "fit_success": False,
+            "plateau": 0.0,
+            "slope": 0.0,
+            "midpoint": 0.0,
+            "chi2_red": 0.0,
+            "p_value": 0.0,
+            "error": str(error),
+        }
+
+
 def save_turn_on_plot(metrics, exp_dir):
     """Save a basic turn-on plot beside the numerical metrics."""
     curve = metrics["turn_on_curve"]
@@ -129,6 +231,43 @@ def save_turn_on_plot(metrics, exp_dir):
         x_fit = np.linspace(bins[0], bins[-1], 500)
         y_fit = fermi_dirac(x_fit, fit["plateau"], fit["slope"], fit["midpoint"])
         ax.plot(x_fit, y_fit, label="Inverse Fermi-Dirac fit")
+
+    baseline = metrics.get("baseline_tob_pt")
+    if baseline:
+        baseline_efficiencies = np.asarray(
+            baseline["binned_efficiencies"], dtype=float
+        )
+        baseline_errors = np.asarray(
+            baseline["binned_efficiencies_err"], dtype=float
+        )
+        ax.errorbar(
+            centers,
+            baseline_efficiencies,
+            yerr=baseline_errors,
+            fmt="s-",
+            color="black",
+            markersize=4,
+            linewidth=1.5,
+            capsize=2,
+            label="Baseline tob_pt (data)",
+        )
+        baseline_fit = baseline["fermi_dirac_fit"]
+        if baseline.get("fit_success"):
+            x_fit = np.linspace(bins[0], bins[-1], 500)
+            y_fit = fermi_dirac(
+                x_fit,
+                baseline_fit["plateau"],
+                baseline_fit["slope"],
+                baseline_fit["midpoint"],
+            )
+            ax.plot(
+                x_fit,
+                y_fit,
+                color="black",
+                linestyle="--",
+                linewidth=1.5,
+                label="Baseline tob_pt (fit)",
+            )
 
     ax.set_xlabel(f"{curve['binning_variable']} [GeV]")
     ax.set_ylabel("Signal efficiency")
@@ -192,7 +331,7 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
         print(f"  -> Error: Column '{bin_var}' not found in predictions. parquet. Skipping.\n")
         return
 
-    sig_df = df[df['Type'] == 'Signal']
+    sig_df = select_truth_tau_objects(df)
     bkg_df = df[df['Type'] == 'BKG']
 
     target_fake_rates = [0.005, 0.010, 0.020]
@@ -208,7 +347,9 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
         threshold, ratio = select_fpr_threshold(
             event_trigger_scores, background_event_count, fr
         )
-        sig_passed = len(sig_df[sig_df['nn_score'] >= threshold])
+        sig_passed = np.count_nonzero(
+            score_pass_mask(sig_df, 'nn_score', threshold)
+        )
         eff = sig_passed / len(sig_df) if len(sig_df) > 0 else 0.0
 
         fr_str = f"{fr * 100:.1f}%"
@@ -232,65 +373,45 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
     eval_bins = np.linspace(pt_min, pt_max, num_bins + 1)
     bin_centers = (eval_bins[:-1] + eval_bins[1:]) / 2.0
 
-    binned_effs = [] # y value
-    binned_effs_err = [] # dy value
-
     print(
         f"\nCalculating Binned Efficiencies at {target_fr} Fake Rate (using {num_bins} bins from {pt_min} to {pt_max} on '{bin_var}')...")
-    for i in range(len(eval_bins) - 1):
-        b_min = eval_bins[i]
-        b_max = eval_bins[i + 1]
-
-        # Use dynamic variable for slicing
-        bin_sig = sig_df[(sig_df[bin_var] >= b_min) & (sig_df[bin_var] < b_max)]
-        denom = len(bin_sig) # count of data points in bin
-
-        if denom > 0:
-            passed = len(bin_sig[bin_sig['nn_score'] >= working_threshold])
-            eff = passed / denom
-            err = np.sqrt(eff * (1.0 - eff) / denom) # binomial error, standard for bins
-            if err == 0.0: # safeguard against unlucky zero error
-                err = 1e-5
-        else:
-            eff = 0.0
-            err = 1 # massive error so fit ignores
-
-        binned_effs.append(float(eff))
-        binned_effs_err.append(float(err))
+    binned_effs, binned_effs_err = calculate_binned_efficiencies(
+        sig_df, 'nn_score', working_threshold, eval_bins, bin_var
+    )
 
     print("Fitting Fermi-Dirac Function...")
-    try:
-        p0 = [1.0, 0.1, 40.0]
-        bounds = ([0.0, 0.0, 0.0], [1.0, np.inf, 300.0])
-        popt, _ = curve_fit(fermi_dirac, bin_centers, binned_effs, p0=p0, bounds=bounds, sigma=binned_effs_err,
-                            absolute_sigma=True)
+    nn_fit = fit_binned_efficiencies(
+        bin_centers, binned_effs, binned_effs_err
+    )
+    if nn_fit["fit_success"]:
+        print(
+            f"  Midpoint: {nn_fit['midpoint']:.2f} | "
+            f"Slope: {nn_fit['slope']:.4f} | "
+            f"Plateau: {nn_fit['plateau']:.4f}"
+        )
+        print(
+            f"  Fit Quality -> Chi2/ndf: {nn_fit['chi2_red']:.3f} | "
+            f"p-value: {nn_fit['p_value']:.4e}"
+        )
+    else:
+        print(f"  Curve fitting failed: {nn_fit['error']}")
 
-        fd_plateau, fd_slope, fd_midpoint = popt
-
-        # --- STATISTICAL TESTS ---
-        y_obs = np.array(binned_effs)
-        y_err = np.array(binned_effs_err)
-        y_fit = fermi_dirac(bin_centers, fd_plateau, fd_slope, fd_midpoint)
-
-        # Only compute chi-squared on valid bins (ignoring empty bins where we forced err=1)
-        valid = y_err < 1.0
-        dof = np.sum(valid) - len(popt)
-
-        if dof > 0:
-            chi2_val = np.sum(((y_obs[valid] - y_fit[valid]) / y_err[valid]) ** 2)
-            chi2_red = chi2_val / dof
-            p_value = chi2.sf(chi2_val, dof)
-        else:
-            chi2_red, p_value = 0.0, 0.0
-
-        fit_success = True
-        print(f"  Midpoint: {fd_midpoint:.2f} | Slope: {fd_slope:.4f} | Plateau: {fd_plateau:.4f}")
-        print(f"  Fit Quality -> Chi2/ndf: {chi2_red:.3f} | p-value: {p_value:.4e}")
-
-    except Exception as e:
-        print(f"  Curve fitting failed: {e}")
-        fd_plateau, fd_slope, fd_midpoint, chi2_red, p_value = 0.0, 0.0, 0.0, 0.0, 0.0
-        fit_success = False
+    baseline_event_scores, baseline_event_count = build_event_trigger_scores(
+        bkg_df, 'tob_pt', objects=2
+    )
+    baseline_threshold, baseline_fpr = select_fpr_threshold(
+        baseline_event_scores, baseline_event_count, 0.005
+    )
+    baseline_effs, baseline_errors = calculate_binned_efficiencies(
+        sig_df, 'tob_pt', baseline_threshold, eval_bins, bin_var
+    )
+    baseline_fit = fit_binned_efficiencies(
+        bin_centers, baseline_effs, baseline_errors
+    )
+    print(
+        f"Baseline tob_pt -> Achieved FPR: {baseline_fpr * 100:.4f}% | "
+        f"Cut: {baseline_threshold:.6g}"
+    )
 
     metrics = {
         "thresholds_by_fake_rate": thresholds,
@@ -302,14 +423,28 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
             "binned_efficiencies": binned_effs,
             "binned_efficiencies_err": binned_effs_err,
             "target_fake_rate_used": target_fr,
-            "fit_success": fit_success,
+            "fit_success": nn_fit["fit_success"],
             "fermi_dirac_fit": {
-                "plateau": float(fd_plateau),
-                "slope": float(fd_slope),
-                "midpoint": float(fd_midpoint),
-                "chi2_red": float(chi2_red),
-                "p_value": float(p_value)
+                "plateau": nn_fit["plateau"],
+                "slope": nn_fit["slope"],
+                "midpoint": nn_fit["midpoint"],
+                "chi2_red": nn_fit["chi2_red"],
+                "p_value": nn_fit["p_value"]
             }
+        },
+        "baseline_tob_pt": {
+            "threshold": float(baseline_threshold),
+            "achieved_fake_rate": float(baseline_fpr),
+            "binned_efficiencies": baseline_effs,
+            "binned_efficiencies_err": baseline_errors,
+            "fit_success": baseline_fit["fit_success"],
+            "fermi_dirac_fit": {
+                "plateau": baseline_fit["plateau"],
+                "slope": baseline_fit["slope"],
+                "midpoint": baseline_fit["midpoint"],
+                "chi2_red": baseline_fit["chi2_red"],
+                "p_value": baseline_fit["p_value"],
+            },
         }
     }
 
@@ -347,6 +482,30 @@ def generate_averaged_metrics(exp_name, folders):
     # Average the bins
     avg_binned_effs = np.mean([m["turn_on_curve"]["binned_efficiencies"] for m in all_metrics], axis=0)
     avg_binned_errs = np.mean([m["turn_on_curve"]["binned_efficiencies_err"] for m in all_metrics], axis=0)
+
+    # Average the independently calibrated tob_pt baseline across the same seeds.
+    baseline_entries = [m.get("baseline_tob_pt") for m in all_metrics]
+    has_complete_baseline = all(entry is not None for entry in baseline_entries)
+    if has_complete_baseline:
+        avg_baseline_threshold = np.mean(
+            [entry["threshold"] for entry in baseline_entries]
+        )
+        avg_baseline_fpr = np.mean(
+            [entry["achieved_fake_rate"] for entry in baseline_entries]
+        )
+        avg_baseline_effs = np.mean(
+            [entry["binned_efficiencies"] for entry in baseline_entries],
+            axis=0,
+        )
+        avg_baseline_errs = np.mean(
+            [entry["binned_efficiencies_err"] for entry in baseline_entries],
+            axis=0,
+        )
+        averaged_baseline_fit = fit_binned_efficiencies(
+            bin_centers,
+            avg_baseline_effs,
+            avg_baseline_errs,
+        )
 
     try:
         p0 = [1.0, 0.1, 40.0]
@@ -396,6 +555,23 @@ def generate_averaged_metrics(exp_name, folders):
             "seeds_averaged": len(all_metrics)
         }
     }
+
+    if has_complete_baseline:
+        metrics_averaged["baseline_tob_pt"] = {
+            "threshold": float(avg_baseline_threshold),
+            "achieved_fake_rate": float(avg_baseline_fpr),
+            "binned_efficiencies": avg_baseline_effs.tolist(),
+            "binned_efficiencies_err": avg_baseline_errs.tolist(),
+            "fit_success": averaged_baseline_fit["fit_success"],
+            "fermi_dirac_fit": {
+                "plateau": averaged_baseline_fit["plateau"],
+                "slope": averaged_baseline_fit["slope"],
+                "midpoint": averaged_baseline_fit["midpoint"],
+                "chi2_red": averaged_baseline_fit["chi2_red"],
+                "p_value": averaged_baseline_fit["p_value"],
+            },
+            "seeds_averaged": len(all_metrics),
+        }
 
     for folder in folders:
         with open(os.path.join(folder, "metrics_averaged.json"), 'w') as f:
