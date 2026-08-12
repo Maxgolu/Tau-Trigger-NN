@@ -14,12 +14,28 @@ from pathlib import Path
 from model import DynamicMLP
 from tracker import ExperimentTracker
 from training_data import TrainingDataCache
+from checkpoint_selection import (
+    calculate_validation_operating_point,
+    is_better_checkpoint,
+    parse_checkpoint_selection,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIGS_DIR = PROJECT_ROOT / "configs"
 DEFAULT_DATA_DIR = PROJECT_ROOT
 DEFAULT_EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
+
+
+def predict_scores(model, data_loader, device):
+    """Return model scores in deterministic DataLoader order."""
+    model.eval()
+    scores = []
+    with torch.no_grad():
+        for X_batch, _ in data_loader:
+            predictions = model(X_batch.to(device))
+            scores.extend(predictions.cpu().numpy().reshape(-1))
+    return np.asarray(scores, dtype=np.float64)
 
 
 def parse_args():
@@ -163,6 +179,10 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     y_val_np = dataset.labels[split.validation]
     y_test_np = dataset.labels[split.test]
 
+    df_val_meta = (
+        dataset.frame.iloc[split.validation].copy().reset_index(drop=True)
+    )
+
     # Experiment outputs must never mutate the shared cached DataFrame.
     df_test_meta = (
         dataset.frame.iloc[split.test].copy().reset_index(drop=True)
@@ -196,10 +216,16 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     optimizer = optim.Adam(model.parameters(), lr=config.get("learning_rate", 0.001))
 
     epochs = config.get("epochs", 20)
+    selection = parse_checkpoint_selection(config)
     print(f"Starting training for {epochs} epochs...")
+    print(
+        "Checkpoint selection: "
+        f"{list(selection.methods)} | primary={selection.primary_method}"
+    )
 
-    # 1. Initialize the tracker variable before the loop
-    best_val_loss = float('inf')
+    best_records = {method: None for method in selection.methods}
+    best_weights = {}
+    checkpoint_history = []
 
     for epoch in range(epochs):
         # -- TRAINING PHASE --
@@ -222,6 +248,7 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         # -- VALIDATION PHASE --
         model.eval()
         running_val_loss = 0.0
+        validation_scores = []
 
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
@@ -229,45 +256,98 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
                 outputs = model(X_batch)
                 val_loss = criterion(outputs, y_batch)
                 running_val_loss += val_loss.item() * X_batch.size(0)
+                validation_scores.extend(outputs.cpu().numpy().reshape(-1))
 
         epoch_val_loss = running_val_loss / len(val_loader.dataset)
+        epoch_record = {
+            "epoch": epoch + 1,
+            "training_bce": float(epoch_train_loss),
+            "validation_bce": float(epoch_val_loss),
+        }
 
-        # Print both metrics to monitor for overfitting
-        print(f"Epoch {epoch + 1:02d}/{epochs} - Train Loss: {epoch_train_loss:.4f} | Val Loss: {epoch_val_loss:.4f}")
+        if "target_fpr" in selection.methods:
+            operating_point = calculate_validation_operating_point(
+                df_val_meta,
+                validation_scores,
+                target_fpr=selection.target_fpr,
+                trigger_objects=selection.trigger_objects,
+                energy_bands_gev=selection.energy_bands_gev,
+            )
+            epoch_record.update(operating_point)
 
-        if epoch_val_loss < best_val_loss:
-            print(f"  --> Validation loss decreased ({best_val_loss:.4f} -> {epoch_val_loss:.4f}). Saving model!")
-            best_val_loss = epoch_val_loss
+        message = (
+            f"Epoch {epoch + 1:02d}/{epochs} - "
+            f"Train Loss: {epoch_train_loss:.4f} | "
+            f"Val Loss: {epoch_val_loss:.4f}"
+        )
+        if "target_fpr" in selection.methods:
+            message += (
+                f" | Val Eff@{selection.target_fpr * 100:.1f}% FPR: "
+                f"{epoch_record['signal_efficiency']:.4f} "
+                f"(achieved {epoch_record['achieved_fpr'] * 100:.4f}%)"
+            )
+        print(message)
 
-            # Save the PyTorch weights ONLY on the best epoch
-            tracker.save_weights(model)
-            best_weights = copy.deepcopy(model.state_dict())
+        for method in selection.methods:
+            if is_better_checkpoint(method, epoch_record, best_records[method]):
+                best_records[method] = copy.deepcopy(epoch_record)
+                best_weights[method] = copy.deepcopy(model.state_dict())
+                if method == "validation_bce":
+                    print("  --> New best validation-BCE checkpoint.")
+                else:
+                    print("  --> New best target-FPR checkpoint.")
+
+        checkpoint_history.append(epoch_record)
 
     # =====================================================================
     # 6. EVALUATION & TRACKING
     # =====================================================================
-    model.load_state_dict(best_weights)
-    model.eval()
-    scores = []
-
-    with torch.no_grad():
-        for X_batch, _ in test_loader:
-            X_batch = X_batch.to(device)
-            predictions = model(X_batch)
-            scores.extend(predictions.cpu().numpy().flatten())
-
-    df_test_meta["nn_score"] = scores
-
-    # Grab all columns required for both object-level kinematics AND event-level grouping
+    # Columns required for object kinematics and event-level threshold calibration.
     core_columns = [
         'eventNumber', 'tob_index', 'signal', 'Type',
         'truth_pt', 'tob_pt', 'tob_eta', 'tob_phi', 'nn_score'
     ]
-    df_eval = df_test_meta[core_columns].copy()
+    artifacts = {}
+    for method in selection.methods:
+        model.load_state_dict(best_weights[method])
+        scores = predict_scores(model, test_loader, device)
+        method_frame = df_test_meta.copy()
+        method_frame["nn_score"] = scores
+        df_eval = method_frame[core_columns].copy()
 
-    # Save everything to the fast Parquet format
-    predictions_path = tracker.save_predictions(df_eval)
-    print(f"--> Saved rich physics predictions to: {predictions_path}")
+        is_primary = method == selection.primary_method
+        weights_filename = (
+            "model_weights.pt" if is_primary
+            else f"model_weights_{method}.pt"
+        )
+        prediction_stem = (
+            "predictions" if is_primary else f"predictions_{method}"
+        )
+        tracker.save_weights(model, filename=weights_filename)
+        predictions_path = tracker.save_predictions(
+            df_eval,
+            stem=prediction_stem,
+        )
+        artifacts[method] = {
+            "role": "primary" if is_primary else "secondary",
+            "weights": weights_filename,
+            "predictions": os.path.basename(predictions_path),
+            "best_validation_record": best_records[method],
+        }
+        print(
+            f"--> Saved {method} test predictions to: {predictions_path}"
+        )
+
+    selection_manifest = {
+        "methods": list(selection.methods),
+        "primary_method": selection.primary_method,
+        "target_fpr": selection.target_fpr,
+        "trigger_objects": selection.trigger_objects,
+        "energy_bands_gev": [list(band) for band in selection.energy_bands_gev],
+        "artifacts": artifacts,
+        "epoch_history": checkpoint_history,
+    }
+    tracker.save_json(selection_manifest, "checkpoint_selection.json")
 
     # =====================================================================
     # OPTIONAL: BACKWARD COMPATIBILITY EXPORT (For Old TOC_1D Notebook)
@@ -281,7 +361,11 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         'truth_pt', 'tob_pt', 'tob_eta', 'tob_phi', 'nn_score'
     ]
     if config.get("save_legacy_csv", False):
-        df_legacy = df_test_meta[legacy_columns].copy()
+        model.load_state_dict(best_weights[selection.primary_method])
+        primary_scores = predict_scores(model, test_loader, device)
+        primary_frame = df_test_meta.copy()
+        primary_frame["nn_score"] = primary_scores
+        df_legacy = primary_frame[legacy_columns].copy()
         df_legacy['Type'] = df_legacy['Type'].replace('Background', 'BKG')
         csv_path = os.path.join(tracker.experiment_dir, "legacy_results_with_scores.csv")
         df_legacy.to_csv(csv_path, index=False)

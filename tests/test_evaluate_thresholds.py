@@ -17,10 +17,45 @@ from evaluate import (
     score_pass_mask,
     select_fpr_threshold,
     select_truth_tau_objects,
+    discover_checkpoint_variants,
 )
 
 
 class ThresholdCalibrationTests(unittest.TestCase):
+    def test_checkpoint_manifest_exposes_primary_and_secondary_predictions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest = {
+                "methods": ["validation_bce", "target_fpr"],
+                "artifacts": {
+                    "validation_bce": {
+                        "role": "secondary",
+                        "predictions": "predictions_validation_bce.parquet",
+                    },
+                    "target_fpr": {
+                        "role": "primary",
+                        "predictions": "predictions.parquet",
+                    },
+                },
+            }
+            with open(
+                Path(temp_dir) / "checkpoint_selection.json", "w"
+            ) as output:
+                json.dump(manifest, output)
+
+            variants = discover_checkpoint_variants(temp_dir)
+
+            self.assertEqual(
+                variants,
+                [
+                    (
+                        "validation_bce",
+                        "validation_bce",
+                        "predictions_validation_bce",
+                    ),
+                    (None, "target_fpr", "predictions"),
+                ],
+            )
+
     def test_continuous_scores_use_largest_allowed_event_budget(self):
         frame = pd.DataFrame(
             {

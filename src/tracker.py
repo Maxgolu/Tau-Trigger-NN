@@ -47,26 +47,26 @@ class ExperimentTracker:
         with open(config_path, 'w') as f:
             json.dump(self.config, f, indent=4)
 
-    def save_weights(self, model: torch.nn.Module):
+    def save_weights(self, model: torch.nn.Module, filename="model_weights.pt"):
         """
         Saves the PyTorch model state dictionary.
 
         Args:
             model (torch.nn.Module): The trained neural network.
         """
-        weights_path = os.path.join(self.experiment_dir, "model_weights.pt")
+        weights_path = os.path.join(self.experiment_dir, filename)
         # Ensure model weights are moved to CPU before saving to avoid GPU pinning issues on load
         torch.save(model.state_dict(), weights_path)
         print(f"--> Saved model weights to: {weights_path}")
 
-    def save_predictions(self, df_eval: pd.DataFrame):
+    def save_predictions(self, df_eval: pd.DataFrame, stem="predictions"):
         """
         Saves the resulting test-set dataframe into an optimized, fast Parquet file.
 
         Args:
             df_eval (pd.DataFrame): Dataframe containing 'eventNumber', 'tob_index', 'signal', 'Type', 'truth_pt', 'tob_pt', 'tob_eta', 'tob_phi', 'nn_score'.
         """
-        parquet_path = os.path.join(self.experiment_dir, "predictions.parquet")
+        parquet_path = os.path.join(self.experiment_dir, f"{stem}.parquet")
         try:
             # Prefer Parquet because it is compact and fast when an engine is available.
             df_eval.to_parquet(parquet_path, index=False, engine='auto')
@@ -74,9 +74,16 @@ class ExperimentTracker:
         except (ImportError, OSError) as error:
             # Some Windows Application Control policies block PyArrow's native DLL.
             # CSV preserves the same table and keeps the pipeline operational.
-            output_path = os.path.join(self.experiment_dir, "predictions.csv")
+            output_path = os.path.join(self.experiment_dir, f"{stem}.csv")
             df_eval.to_csv(output_path, index=False)
             print(f"--> Parquet unavailable ({error.__class__.__name__}); using CSV fallback.")
 
         print(f"--> Saved test predictions to: {output_path}")
+        return output_path
+
+    def save_json(self, data, filename):
+        """Save structured experiment metadata beside the model artifacts."""
+        output_path = os.path.join(self.experiment_dir, filename)
+        with open(output_path, "w", encoding="utf-8") as output:
+            json.dump(data, output, indent=4)
         return output_path

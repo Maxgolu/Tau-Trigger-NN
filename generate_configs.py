@@ -37,6 +37,28 @@ def parse_args():
         default=[42, 123, 456],
         help="Random seeds for every requested feature set.",
     )
+    parser.add_argument(
+        "--checkpoint-method",
+        action="append",
+        choices=["validation_bce", "target_fpr"],
+        default=None,
+        help=(
+            "Checkpoint selector. Repeat to retain both validation BCE and "
+            "target-FPR checkpoints."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-primary",
+        choices=["validation_bce", "target_fpr"],
+        default=None,
+        help="Primary artifact method when both checkpoint selectors are used.",
+    )
+    parser.add_argument(
+        "--checkpoint-target-fpr",
+        type=float,
+        default=0.005,
+        help="Validation event FPR used by target_fpr selection (default: 0.005).",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +91,7 @@ def generate_sweep_configs(
     output_dir=DEFAULT_CONFIG_DIR,
     feature_sets=None,
     seeds=None,
+    checkpoint_selection=None,
 ):
     base_config = {"epochs": 20}
     learning_rates = [0.001]
@@ -107,6 +130,8 @@ def generate_sweep_configs(
                     "seed": seed,
                 }
             )
+            if checkpoint_selection is not None:
+                config["checkpoint_selection"] = checkpoint_selection
             filename = f"c{config_number:03d}_s{seed}.json"
             write_config(config, output_dir, filename)
             count += 1
@@ -128,8 +153,23 @@ if __name__ == "__main__":
             if any(not feature_set for feature_set in requested_feature_sets):
                 raise ValueError("Each --feature-set must contain at least one feature name.")
 
+        checkpoint_selection = None
+        if args.checkpoint_method:
+            primary = args.checkpoint_primary or args.checkpoint_method[0]
+            if primary not in args.checkpoint_method:
+                raise ValueError(
+                    "--checkpoint-primary must also be supplied through "
+                    "--checkpoint-method"
+                )
+            checkpoint_selection = {
+                "methods": args.checkpoint_method,
+                "primary_method": primary,
+                "target_fpr": args.checkpoint_target_fpr,
+            }
+
         generate_sweep_configs(
             output_dir=args.output_dir,
             feature_sets=requested_feature_sets,
             seeds=args.seeds,
+            checkpoint_selection=checkpoint_selection,
         )

@@ -1,0 +1,24 @@
+{
+    "epochs": 20,
+    "run_id": "c004_s123",
+    "experiment_name": "TauNet_lr0.001_bs256_arch32x16_core_physics_em2_best_3x3_fraction",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        32,
+        16
+    ],
+    "features_to_use": [
+        "core_physics",
+        "em2_best_3x3_fraction"
+    ],
+    "seed": 123,
+    "checkpoint_selection": {
+        "methods": [
+            "validation_bce",
+            "target_fpr"
+        ],
+        "primary_method": "target_fpr",
+        "target_fpr": 0.005
+    }
+}

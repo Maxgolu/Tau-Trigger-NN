@@ -8,104 +8,17 @@ from scipy.optimize import curve_fit
 from scipy.stats import chi2
 from pathlib import Path
 
+from operating_point import (
+    CalcThresh,
+    build_event_trigger_scores,
+    score_pass_mask,
+    select_background_objects,
+    select_fpr_threshold,
+    select_truth_tau_objects,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
-
-def build_event_trigger_scores(df, criterion, objects=2):
-    """Return the score at which every background event starts to pass.
-
-    With the common ``score >= threshold`` rule, an event passes an
-    ``at least objects`` trigger exactly when its objects-th highest score is
-    at least the threshold. Events with too few finite objects never pass but
-    remain part of the FPR denominator.
-    """
-    if objects < 1:
-        raise ValueError("objects must be at least 1")
-    required = {"eventNumber", criterion}
-    missing = required.difference(df.columns)
-    if missing:
-        raise KeyError(f"Missing required columns: {sorted(missing)}")
-
-    event_count = int(df["eventNumber"].nunique())
-    if event_count == 0:
-        raise ValueError("Cannot calibrate a threshold without background events")
-
-    finite_rows = df.loc[
-        np.isfinite(df[criterion].to_numpy(dtype=float)),
-        ["eventNumber", criterion],
-    ]
-    ordered = finite_rows.sort_values(
-        ["eventNumber", criterion], ascending=[True, False], kind="mergesort"
-    )
-    kth_scores = (
-        ordered.groupby("eventNumber", sort=False)[criterion]
-        .nth(objects - 1)
-        .to_numpy(dtype=float)
-    )
-    return kth_scores, event_count
-
-
-def select_fpr_threshold(event_trigger_scores, event_count, target_fake_rate):
-    """Select the lowest threshold whose empirical event FPR is within target.
-
-    Tied scores are kept together. Therefore the achieved FPR can be below the
-    requested value when no deterministic threshold can attain it exactly.
-    """
-    if not 0.0 <= target_fake_rate <= 1.0:
-        raise ValueError("target_fake_rate must be between 0 and 1")
-    if event_count <= 0:
-        raise ValueError("event_count must be positive")
-
-    scores = np.asarray(event_trigger_scores, dtype=float)
-    scores = scores[np.isfinite(scores)]
-    if scores.size == 0:
-        return np.inf, 0.0
-
-    # The integer budget guarantees achieved_fpr <= target_fake_rate.
-    max_accepted = int(np.floor(target_fake_rate * event_count + 1e-12))
-    unique_scores, tied_counts = np.unique(scores, return_counts=True)
-    unique_scores = unique_scores[::-1]
-    tied_counts = tied_counts[::-1]
-    cumulative = np.cumsum(tied_counts)
-    feasible = np.flatnonzero(cumulative <= max_accepted)
-
-    if feasible.size == 0:
-        # Including even the highest tied score would exceed the target.
-        threshold = np.nextafter(unique_scores[0], np.inf)
-    else:
-        last = int(feasible[-1])
-        threshold = unique_scores[last]
-
-    # Recompute with the exact same >= rule used by the final efficiency curve.
-    achieved_fpr = float(np.count_nonzero(scores >= threshold) / event_count)
-    return float(threshold), achieved_fpr
-
-
-def CalcThresh(DF, Criteria, FakeRate, objects=2):
-    """Backward-compatible wrapper for exact event-level FPR calibration."""
-    event_scores, event_count = build_event_trigger_scores(DF, Criteria, objects)
-    return select_fpr_threshold(event_scores, event_count, FakeRate)
-
-
-def select_truth_tau_objects(df):
-    """Return only objects that are truth-matched to a tau.
-
-    The Signal sample also contains non-tau objects, so its sample name alone
-    is not an object label.
-    """
-    required = {"Type", "signal"}
-    missing = required.difference(df.columns)
-    if missing:
-        raise KeyError(f"Missing required columns: {sorted(missing)}")
-    return df.loc[(df["Type"] == "Signal") & (df["signal"] == 1)]
-
-
-def score_pass_mask(df, criterion, threshold):
-    """Apply the final score cut with the calibration numeric precision."""
-    if criterion not in df.columns:
-        raise KeyError(f"Missing required column: {criterion}")
-    scores = df[criterion].to_numpy(dtype=np.float64)
-    return np.isfinite(scores) & (scores >= np.float64(threshold))
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Tau Particle NN Predictions")
@@ -214,7 +127,7 @@ def fit_binned_efficiencies(bin_centers, efficiencies, errors):
         }
 
 
-def save_turn_on_plot(metrics, exp_dir):
+def save_turn_on_plot(metrics, exp_dir, filename="turn_on_curve.png"):
     """Save a basic turn-on plot beside the numerical metrics."""
     curve = metrics["turn_on_curve"]
     bins = np.asarray(curve["bins"], dtype=float)
@@ -275,16 +188,16 @@ def save_turn_on_plot(metrics, exp_dir):
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    plot_path = os.path.join(exp_dir, "turn_on_curve.png")
+    plot_path = os.path.join(exp_dir, filename)
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
     print(f"Saved turn-on plot to {plot_path}")
 
 
-def load_predictions(exp_dir):
+def load_predictions(exp_dir, stem="predictions"):
     """Load predictions from preferred Parquet storage or the CSV fallback."""
-    parquet_path = os.path.join(exp_dir, "predictions.parquet")
-    csv_path = os.path.join(exp_dir, "predictions.csv")
+    parquet_path = os.path.join(exp_dir, f"{stem}.parquet")
+    csv_path = os.path.join(exp_dir, f"{stem}.csv")
 
     if os.path.exists(parquet_path):
         try:
@@ -304,18 +217,65 @@ def load_predictions(exp_dir):
     return None
 
 
-def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
+def discover_checkpoint_variants(exp_dir):
+    """Return standard and optional secondary checkpoint prediction artifacts."""
+    manifest_path = os.path.join(exp_dir, "checkpoint_selection.json")
+    if not os.path.exists(manifest_path):
+        return [(None, None, "predictions")]
+
+    with open(manifest_path, "r", encoding="utf-8") as source:
+        manifest = json.load(source)
+
+    variants = []
+    for method in manifest.get("methods", []):
+        artifact = manifest.get("artifacts", {}).get(method, {})
+        prediction_name = artifact.get("predictions", "")
+        if not prediction_name:
+            continue
+        stem = os.path.splitext(prediction_name)[0]
+        suffix = None if artifact.get("role") == "primary" else method
+        variants.append((suffix, method, stem))
+    return variants or [(None, None, "predictions")]
+
+
+def _validation_record(exp_dir, checkpoint_method):
+    if checkpoint_method is None:
+        return None
+    manifest_path = os.path.join(exp_dir, "checkpoint_selection.json")
+    if not os.path.exists(manifest_path):
+        return None
+    with open(manifest_path, "r", encoding="utf-8") as source:
+        manifest = json.load(source)
+    return (
+        manifest.get("artifacts", {})
+        .get(checkpoint_method, {})
+        .get("best_validation_record")
+    )
+
+
+def evaluate_experiment(
+    exp_dir,
+    recalc,
+    num_bins,
+    pt_min,
+    pt_max,
+    bin_var,
+    output_suffix=None,
+    checkpoint_method=None,
+    prediction_stem="predictions",
+):
     print(f"\n{'=' * 40}")
     print(f"Evaluating Experiment: {exp_dir}")
     print(f"{'=' * 40}")
 
-    metrics_path = os.path.join(exp_dir, "metrics.json")
+    filename_suffix = f"_{output_suffix}" if output_suffix else ""
+    metrics_path = os.path.join(exp_dir, f"metrics{filename_suffix}.json")
 
     if os.path.exists(metrics_path) and not recalc:
         print(f"  -> metrics.json already exists. Skipping (use --recalc to override).\n")
         return
 
-    df = load_predictions(exp_dir)
+    df = load_predictions(exp_dir, stem=prediction_stem)
     if df is None:
         print(f"  -> Could not find predictions.parquet or predictions.csv in {exp_dir}. Skipping.\n")
         return
@@ -332,7 +292,7 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
         return
 
     sig_df = select_truth_tau_objects(df)
-    bkg_df = df[df['Type'] == 'BKG']
+    bkg_df = select_background_objects(df)
 
     target_fake_rates = [0.005, 0.010, 0.020]
     thresholds = {}
@@ -414,6 +374,7 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
     )
 
     metrics = {
+        "checkpoint_method": checkpoint_method,
         "thresholds_by_fake_rate": thresholds,
         "achieved_fake_rates": achieved_fake_rates,
         "global_efficiency": global_efficiencies,
@@ -448,20 +409,63 @@ def evaluate_experiment(exp_dir, recalc, num_bins, pt_min, pt_max, bin_var):
         }
     }
 
+    validation_record = _validation_record(exp_dir, checkpoint_method)
+    if validation_record and "threshold" in validation_record:
+        fixed_threshold = float(validation_record["threshold"])
+        fixed_event_scores, fixed_event_count = build_event_trigger_scores(
+            bkg_df,
+            "nn_score",
+            objects=int(validation_record.get("trigger_objects", 2)),
+        )
+        fixed_test_fpr = float(
+            np.count_nonzero(fixed_event_scores >= fixed_threshold)
+            / fixed_event_count
+        )
+        fixed_signal_pass = score_pass_mask(
+            sig_df, "nn_score", fixed_threshold
+        )
+        fixed_signal_efficiency = (
+            float(fixed_signal_pass.mean()) if len(sig_df) else 0.0
+        )
+        fixed_binned_effs, fixed_binned_errs = calculate_binned_efficiencies(
+            sig_df,
+            "nn_score",
+            fixed_threshold,
+            eval_bins,
+            bin_var,
+        )
+        metrics["validation_calibrated_operating_point"] = {
+            "threshold": fixed_threshold,
+            "validation": validation_record,
+            "test_achieved_fake_rate": fixed_test_fpr,
+            "test_signal_efficiency": fixed_signal_efficiency,
+            "test_binned_efficiencies": fixed_binned_effs,
+            "test_binned_efficiencies_err": fixed_binned_errs,
+        }
+
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=4)
 
-    save_turn_on_plot(metrics, exp_dir)
+    save_turn_on_plot(
+        metrics,
+        exp_dir,
+        filename=f"turn_on_curve{filename_suffix}.png",
+    )
 
     print(f"\nEvaluation complete! Hard numbers saved to {metrics_path}")
 
 
-def generate_averaged_metrics(exp_name, folders):
+def generate_averaged_metrics(
+    exp_name,
+    folders,
+    metrics_filename="metrics.json",
+    output_filename="metrics_averaged.json",
+):
     from scipy.stats import chi2
 
     all_metrics = []
     for folder in folders:
-        with open(os.path.join(folder, "metrics.json"), 'r') as f:
+        with open(os.path.join(folder, metrics_filename), 'r') as f:
             all_metrics.append(json.load(f))
 
     base = all_metrics[0]
@@ -535,6 +539,7 @@ def generate_averaged_metrics(exp_name, folders):
         fit_success = False
 
     metrics_averaged = {
+        "checkpoint_method": base.get("checkpoint_method"),
         "thresholds_by_fake_rate": {k: float(v) for k, v in avg_thresholds.items()},
         "achieved_fake_rates": {k: float(v) for k, v in avg_achieved_fake_rates.items()},
         "global_efficiency": {k: float(v) for k, v in avg_global_effs.items()},
@@ -574,7 +579,7 @@ def generate_averaged_metrics(exp_name, folders):
         }
 
     for folder in folders:
-        with open(os.path.join(folder, "metrics_averaged.json"), 'w') as f:
+        with open(os.path.join(folder, output_filename), 'w') as f:
             json.dump(metrics_averaged, f, indent=4)
 
 
@@ -586,7 +591,18 @@ def main():
     # 1. Standard evaluation sequence
     if args.experiment_dir:
         experiment_dir = os.path.abspath(args.experiment_dir)
-        evaluate_experiment(experiment_dir, args.recalc, args.num_bins, args.pt_min, args.pt_max, args.bin_var)
+        for suffix, method, stem in discover_checkpoint_variants(experiment_dir):
+            evaluate_experiment(
+                experiment_dir,
+                args.recalc,
+                args.num_bins,
+                args.pt_min,
+                args.pt_max,
+                args.bin_var,
+                output_suffix=suffix,
+                checkpoint_method=method,
+                prediction_stem=stem,
+            )
         base_dir = os.path.dirname(experiment_dir)
     else:
         if not os.path.isdir(base_dir):
@@ -600,7 +616,18 @@ def main():
                 or os.path.exists(os.path.join(item_path, "predictions.csv"))
             )
             if os.path.isdir(item_path) and has_predictions:
-                evaluate_experiment(item_path, args.recalc, args.num_bins, args.pt_min, args.pt_max, args.bin_var)
+                for suffix, method, stem in discover_checkpoint_variants(item_path):
+                    evaluate_experiment(
+                        item_path,
+                        args.recalc,
+                        args.num_bins,
+                        args.pt_min,
+                        args.pt_max,
+                        args.bin_var,
+                        output_suffix=suffix,
+                        checkpoint_method=method,
+                        prediction_stem=stem,
+                    )
 
     # 2. Always group and average the seeds afterward
     print(f"\n{'=' * 40}")
@@ -613,25 +640,41 @@ def main():
     for item in sorted(os.listdir(base_dir)):
         item_path = os.path.join(base_dir, item)
         config_path = os.path.join(item_path, "config.json")
-        metrics_path = os.path.join(item_path, "metrics.json")
-
-        # Only group folders that have successfully generated the standard metrics
-        if os.path.isdir(item_path) and os.path.exists(config_path) and os.path.exists(metrics_path):
+        if os.path.isdir(item_path) and os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            with open(metrics_path, 'r') as f:
-                metrics = json.load(f)
-            if "achieved_fake_rates" not in metrics:
-                print(f"  -> Skipping legacy metrics without verified FPR: {item_path}")
-                continue
             exp_name = config.get("experiment_name", "unknown")
-            experiment_groups[exp_name].append(item_path)
+            variants = discover_checkpoint_variants(item_path)
+            for suffix, method, _ in variants:
+                filename_suffix = f"_{suffix}" if suffix else ""
+                metrics_filename = f"metrics{filename_suffix}.json"
+                metrics_path = os.path.join(item_path, metrics_filename)
+                if not os.path.exists(metrics_path):
+                    continue
+                with open(metrics_path, 'r') as f:
+                    metrics = json.load(f)
+                if "achieved_fake_rates" not in metrics:
+                    print(
+                        "  -> Skipping legacy metrics without verified FPR: "
+                        f"{metrics_path}"
+                    )
+                    continue
+                group_key = (exp_name, suffix, method, metrics_filename)
+                experiment_groups[group_key].append(item_path)
 
-    for exp_name, folders in experiment_groups.items():
+    for group_key, folders in experiment_groups.items():
+        exp_name, suffix, method, metrics_filename = group_key
+        display_name = exp_name if method is None else f"{exp_name} [{method}]"
         if len(folders) > 1:
-            generate_averaged_metrics(exp_name, folders)
+            filename_suffix = f"_{suffix}" if suffix else ""
+            generate_averaged_metrics(
+                display_name,
+                folders,
+                metrics_filename=metrics_filename,
+                output_filename=f"metrics_averaged{filename_suffix}.json",
+            )
         else:
-            print(f"  -> Skipping '{exp_name}': Only 1 seed found.")
+            print(f"  -> Skipping '{display_name}': Only 1 seed found.")
 
 if __name__ == "__main__":
     main()

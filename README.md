@@ -35,11 +35,14 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── model.py                 # PyTorch implementation of the Dynamic MLP
 │   ├── tracker.py               # Experiment tracking and artifact archiving
 │   ├── training_data.py         # Reusable data loading, alignment, event splitting, and in-memory caching
+│   ├── operating_point.py       # Shared event-level FPR threshold calculations
+│   ├── checkpoint_selection.py  # Configurable validation checkpoint selection
 │   └── train.py                 # Main training loop and configuration-sweep orchestration
 ├── tests/                       # Automated correctness checks for reusable project logic
 │   ├── test_distributions.py    # Distribution, event grouping, and split regression tests
 │   ├── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
 │   ├── test_features.py         # Object-specific geometry and feature regression tests
+│   ├── test_checkpoint_selection.py # Validation checkpoint-selection regression tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
@@ -96,6 +99,19 @@ python generate_configs.py --output-dir configs/event_features_v1 \
 
 This example creates nine configurations: three feature sets evaluated with three random seeds. The available generator options are `--feature-set`, `--seeds`, `--output-dir`, and `--smoke-test`.
 
+Checkpoint selection can use validation BCE, signal efficiency at a target
+event FPR, or both methods in the same training run:
+
+```bash
+python generate_configs.py --output-dir configs/checkpoint_study \
+  --feature-set "core_physics,em2_best_3x3_fraction" \
+  --seeds 42 123 456 \
+  --checkpoint-method validation_bce \
+  --checkpoint-method target_fpr \
+  --checkpoint-primary target_fpr \
+  --checkpoint-target-fpr 0.005
+```
+
 ### Step 2: Train the Network
 Main training script. 
 Standard usage is giving it a config directory, and it will generate an "experiment" folder for each JSON config file within that directory.
@@ -124,6 +140,11 @@ To train only the CPU smoke test:
 python src/train.py --config configs/smoke_s42.json
 ```
 *Artifacts, including `config.json`, `model_weights.pt`, and predictions, are safely archived into timestamped subfolders within `experiments/`. Predictions use Parquet when available and automatically fall back to CSV when a Parquet engine is blocked or unavailable.*
+
+When both checkpoint methods are enabled, the primary method keeps the standard
+artifact names. The secondary method receives a method suffix.
+`checkpoint_selection.json` records the best epochs, validation threshold,
+achieved FPR, and signal efficiencies.
 
 ### Step 3: Run Physics Evaluation
 Extract event-level thresholds, calculate efficiencies, and perform Fermi-Dirac curve fitting.
@@ -182,3 +203,4 @@ The evaluation script operates on the `predictions.parquet` files generated duri
 * Bins the truth-matched tau data across 44 segments to calculate binomial efficiencies and maps them to a Fermi-Dirac function via `scipy.optimize.curve_fit` to extract the midpoint, slope, and plateau.
 * Adds a black `tob_pt` baseline to every turn-on plot, calibrated independently on the same test events and target Fake Rate.
 * Multi-seed experiments are automatically aggregated, including their independently calibrated `tob_pt` baselines, to compute stable statistical metrics.
+* Optional checkpoint variants are evaluated separately. Target-FPR checkpoints also report test performance at the fixed threshold calibrated only on validation data.
