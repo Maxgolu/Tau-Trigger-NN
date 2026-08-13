@@ -1,0 +1,33 @@
+{
+    "epochs": 20,
+    "run_id": "c002_s456",
+    "experiment_name": "TauNet_lr0.001_bs256_arch32x16_core_physics_core_tensors",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        32,
+        16
+    ],
+    "features_to_use": [
+        "core_physics",
+        "core_tensors"
+    ],
+    "seed": 456,
+    "checkpoint_selection": {
+        "methods": [
+            "validation_bce",
+            "target_fpr"
+        ],
+        "primary_method": "target_fpr",
+        "target_fpr": 0.005
+    },
+    "classifier": {
+        "name": "tob_nn_or",
+        "target_fpr": 0.005,
+        "trigger_objects": 2,
+        "tob_fpr": 0.004
+    },
+    "loss": {
+        "name": "bce"
+    }
+}

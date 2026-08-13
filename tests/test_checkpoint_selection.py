@@ -13,6 +13,7 @@ from checkpoint_selection import (
     is_better_checkpoint,
     parse_checkpoint_selection,
 )
+from classifiers import parse_classifier
 
 
 class CheckpointSelectionTests(unittest.TestCase):
@@ -93,6 +94,55 @@ class CheckpointSelectionTests(unittest.TestCase):
                 "target_fpr", lower_bce_lower_efficiency, older
             )
         )
+
+    def test_target_fpr_can_select_the_or_classifier(self):
+        background_events = 1000
+        background = pd.DataFrame(
+            {
+                "eventNumber": np.repeat(np.arange(background_events), 2),
+                "Type": "BKG",
+                "signal": 0,
+                "truth_pt": 0.0,
+                "tob_pt": np.tile([20.0, 1.0], background_events),
+            }
+        )
+        signal = pd.DataFrame(
+            {
+                "eventNumber": [2000, 2000],
+                "Type": "Signal",
+                "signal": [1, 1],
+                "truth_pt": [20_000.0, 80_000.0],
+                "tob_pt": [5.0, 30.0],
+            }
+        )
+        frame = pd.concat([background, signal], ignore_index=True)
+        scores = np.concatenate(
+            [
+                np.column_stack(
+                    [np.zeros(background_events), np.linspace(1.0, 0.001, background_events)]
+                ).reshape(-1),
+                [1.1, 0.0],
+            ]
+        )
+        classifier = parse_classifier(
+            {
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "target_fpr": 0.005,
+                    "tob_fpr": 0.0,
+                }
+            }
+        )
+
+        result = calculate_validation_operating_point(
+            frame,
+            scores,
+            classifier_config=classifier,
+        )
+
+        self.assertEqual(result["classifier_calibration"]["name"], "tob_nn_or")
+        self.assertEqual(result["signal_efficiency"], 1.0)
+        self.assertLessEqual(result["achieved_fpr"], 0.005)
 
 
 if __name__ == "__main__":

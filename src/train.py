@@ -2,8 +2,8 @@ import argparse
 import json
 import torch
 import random
-import torch.nn as nn
 import torch.optim as optim
+import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
@@ -12,6 +12,8 @@ import copy
 from pathlib import Path
 
 from model import DynamicMLP
+from classifiers import parse_classifier
+from losses import build_loss, parse_loss
 from tracker import ExperimentTracker
 from training_data import TrainingDataCache
 from checkpoint_selection import (
@@ -212,12 +214,43 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         hidden_layers=config.get("hidden_layers", [32, 16])  # Matches your MLP logic
     ).to(device)
 
-    criterion = nn.BCELoss()
+    loss_config = parse_loss(config)
+    training_criterion = build_loss(loss_config)
+    bce_monitor = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=config.get("learning_rate", 0.001))
 
     epochs = config.get("epochs", 20)
     selection = parse_checkpoint_selection(config)
+    if "classifier" not in config:
+        classifier_config = parse_classifier(
+            {
+                "classifier": {
+                    "name": "nn_only",
+                    "target_fpr": selection.target_fpr,
+                    "trigger_objects": selection.trigger_objects,
+                }
+            }
+        )
+    else:
+        classifier_config = parse_classifier(config)
+        if classifier_config.trigger_objects != selection.trigger_objects:
+            raise ValueError(
+                "classifier.trigger_objects and "
+                "checkpoint_selection.trigger_objects must match"
+            )
+        if not np.isclose(classifier_config.target_fpr, selection.target_fpr):
+            raise ValueError(
+                "classifier.target_fpr and checkpoint_selection.target_fpr "
+                "must match"
+            )
+    needs_operating_point = (
+        "target_fpr" in selection.methods
+        or classifier_config.name != "nn_only"
+    )
     print(f"Starting training for {epochs} epochs...")
+    print(
+        f"Classifier: {classifier_config.name} | Loss: {loss_config.name}"
+    )
     print(
         "Checkpoint selection: "
         f"{list(selection.methods)} | primary={selection.primary_method}"
@@ -231,56 +264,71 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         # -- TRAINING PHASE --
         model.train()
         running_train_loss = 0.0
+        running_train_bce = 0.0
 
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
 
             optimizer.zero_grad()
             outputs = model(X_batch)
-            loss = criterion(outputs, y_batch)
+            loss = training_criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
 
             running_train_loss += loss.item() * X_batch.size(0)
+            running_train_bce += (
+                bce_monitor(outputs.detach(), y_batch).item()
+                * X_batch.size(0)
+            )
 
         epoch_train_loss = running_train_loss / len(train_loader.dataset)
+        epoch_train_bce = running_train_bce / len(train_loader.dataset)
 
         # -- VALIDATION PHASE --
         model.eval()
         running_val_loss = 0.0
+        running_val_bce = 0.0
         validation_scores = []
 
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 outputs = model(X_batch)
-                val_loss = criterion(outputs, y_batch)
+                val_loss = training_criterion(outputs, y_batch)
                 running_val_loss += val_loss.item() * X_batch.size(0)
+                running_val_bce += (
+                    bce_monitor(outputs, y_batch).item() * X_batch.size(0)
+                )
                 validation_scores.extend(outputs.cpu().numpy().reshape(-1))
 
         epoch_val_loss = running_val_loss / len(val_loader.dataset)
+        epoch_val_bce = running_val_bce / len(val_loader.dataset)
         epoch_record = {
             "epoch": epoch + 1,
-            "training_bce": float(epoch_train_loss),
-            "validation_bce": float(epoch_val_loss),
+            "training_loss": float(epoch_train_loss),
+            "validation_loss": float(epoch_val_loss),
+            "training_bce": float(epoch_train_bce),
+            "validation_bce": float(epoch_val_bce),
         }
 
-        if "target_fpr" in selection.methods:
+        if needs_operating_point:
             operating_point = calculate_validation_operating_point(
                 df_val_meta,
                 validation_scores,
                 target_fpr=selection.target_fpr,
                 trigger_objects=selection.trigger_objects,
                 energy_bands_gev=selection.energy_bands_gev,
+                classifier_config=classifier_config,
             )
             epoch_record.update(operating_point)
 
         message = (
             f"Epoch {epoch + 1:02d}/{epochs} - "
-            f"Train Loss: {epoch_train_loss:.4f} | "
-            f"Val Loss: {epoch_val_loss:.4f}"
+            f"Train {loss_config.name}: {epoch_train_loss:.4f} | "
+            f"Val {loss_config.name}: {epoch_val_loss:.4f} | "
+            f"Val BCE: {epoch_val_bce:.4f}"
         )
-        if "target_fpr" in selection.methods:
+        if needs_operating_point:
             message += (
                 f" | Val Eff@{selection.target_fpr * 100:.1f}% FPR: "
                 f"{epoch_record['signal_efficiency']:.4f} "
@@ -343,6 +391,8 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         "primary_method": selection.primary_method,
         "target_fpr": selection.target_fpr,
         "trigger_objects": selection.trigger_objects,
+        "classifier": classifier_config.to_dict(),
+        "loss": {"name": loss_config.name},
         "energy_bands_gev": [list(band) for band in selection.energy_bands_gev],
         "artifacts": artifacts,
         "epoch_history": checkpoint_history,

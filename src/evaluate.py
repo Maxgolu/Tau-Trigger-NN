@@ -8,6 +8,13 @@ from scipy.optimize import curve_fit
 from scipy.stats import chi2
 from pathlib import Path
 
+from classifiers import (
+    calibrate_classifier,
+    classifier_event_pass_mask,
+    classifier_object_pass_mask,
+    parse_classifier,
+    tob_pt_gev,
+)
 from operating_point import (
     CalcThresh,
     build_event_trigger_scores,
@@ -28,6 +35,21 @@ def parse_args():
                         help="Directory containing experiment subfolders.")
     parser.add_argument("--recalc", action="store_true",
                         help="Recalculates even if metrics.json already exists.")
+    parser.add_argument(
+        "--classifier",
+        choices=["nn_only", "tob_nn_or"],
+        default=None,
+        help=(
+            "Optional post-hoc classifier override. Results receive a classifier "
+            "suffix and do not overwrite the configured classifier metrics."
+        ),
+    )
+    parser.add_argument(
+        "--classifier-tob-fpr",
+        type=float,
+        default=0.004,
+        help="TOB branch event-FPR budget for tob_nn_or (default: 0.004).",
+    )
 
     # Binning Arguments
     parser.add_argument("--num_bins", type=int, default=44,
@@ -74,6 +96,34 @@ def calculate_binned_efficiencies(
         efficiencies.append(float(efficiency))
         errors.append(float(error))
 
+    return efficiencies, errors
+
+
+def calculate_binned_mask_efficiencies(
+    signal_df, passed, eval_bins, bin_var
+):
+    """Measure binned efficiency from a precomputed classifier decision."""
+    passed = np.asarray(passed, dtype=bool)
+    if len(passed) != len(signal_df):
+        raise ValueError("Pass mask must align one-to-one with signal rows")
+    values = signal_df[bin_var].to_numpy(dtype=np.float64)
+    efficiencies = []
+    errors = []
+    for b_min, b_max in zip(eval_bins[:-1], eval_bins[1:]):
+        in_bin = (values >= b_min) & (values < b_max)
+        denominator = int(np.count_nonzero(in_bin))
+        if denominator:
+            efficiency = float(np.count_nonzero(passed & in_bin) / denominator)
+            error = float(
+                np.sqrt(efficiency * (1.0 - efficiency) / denominator)
+            )
+            if error == 0.0:
+                error = 1e-5
+        else:
+            efficiency = 0.0
+            error = 1.0
+        efficiencies.append(efficiency)
+        errors.append(error)
     return efficiencies, errors
 
 
@@ -127,8 +177,54 @@ def fit_binned_efficiencies(bin_centers, efficiencies, errors):
         }
 
 
+def _add_baseline(ax, metrics, centers, bins):
+    """Add the measured and fitted TOB baseline to one axis."""
+    baseline = metrics.get("baseline_tob_pt")
+    if not baseline:
+        return
+    ax.errorbar(
+        centers,
+        np.asarray(baseline["binned_efficiencies"], dtype=float),
+        yerr=np.asarray(baseline["binned_efficiencies_err"], dtype=float),
+        fmt="s-",
+        color="black",
+        markersize=4,
+        linewidth=1.5,
+        capsize=2,
+        label="Baseline tob_pt (data)",
+    )
+    baseline_fit = baseline["fermi_dirac_fit"]
+    if baseline.get("fit_success"):
+        x_fit = np.linspace(bins[0], bins[-1], 500)
+        ax.plot(
+            x_fit,
+            fermi_dirac(
+                x_fit,
+                baseline_fit["plateau"],
+                baseline_fit["slope"],
+                baseline_fit["midpoint"],
+            ),
+            color="black",
+            linestyle="--",
+            linewidth=1.5,
+            label="Baseline tob_pt (fit)",
+        )
+
+
+def _finish_turn_on_plot(fig, ax, curve, output_path):
+    ax.set_xlabel(f"{curve['binning_variable']} [GeV]")
+    ax.set_ylabel("Signal efficiency")
+    ax.set_ylim(0.0, 1.05)
+    ax.grid(alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved turn-on plot to {output_path}")
+
+
 def save_turn_on_plot(metrics, exp_dir, filename="turn_on_curve.png"):
-    """Save a basic turn-on plot beside the numerical metrics."""
+    """Save the final classifier versus baseline without branch clutter."""
     curve = metrics["turn_on_curve"]
     bins = np.asarray(curve["bins"], dtype=float)
     centers = (bins[:-1] + bins[1:]) / 2.0
@@ -137,7 +233,7 @@ def save_turn_on_plot(metrics, exp_dir, filename="turn_on_curve.png"):
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.errorbar(centers, efficiencies, yerr=errors, fmt="o", markersize=4,
-                capsize=2, label="Measured efficiency")
+                capsize=2, label="Configured classifier")
 
     fit = curve["fermi_dirac_fit"]
     if curve.get("fit_success"):
@@ -145,53 +241,32 @@ def save_turn_on_plot(metrics, exp_dir, filename="turn_on_curve.png"):
         y_fit = fermi_dirac(x_fit, fit["plateau"], fit["slope"], fit["midpoint"])
         ax.plot(x_fit, y_fit, label="Inverse Fermi-Dirac fit")
 
-    baseline = metrics.get("baseline_tob_pt")
-    if baseline:
-        baseline_efficiencies = np.asarray(
-            baseline["binned_efficiencies"], dtype=float
-        )
-        baseline_errors = np.asarray(
-            baseline["binned_efficiencies_err"], dtype=float
-        )
-        ax.errorbar(
-            centers,
-            baseline_efficiencies,
-            yerr=baseline_errors,
-            fmt="s-",
-            color="black",
-            markersize=4,
-            linewidth=1.5,
-            capsize=2,
-            label="Baseline tob_pt (data)",
-        )
-        baseline_fit = baseline["fermi_dirac_fit"]
-        if baseline.get("fit_success"):
-            x_fit = np.linspace(bins[0], bins[-1], 500)
-            y_fit = fermi_dirac(
-                x_fit,
-                baseline_fit["plateau"],
-                baseline_fit["slope"],
-                baseline_fit["midpoint"],
-            )
-            ax.plot(
-                x_fit,
-                y_fit,
-                color="black",
-                linestyle="--",
-                linewidth=1.5,
-                label="Baseline tob_pt (fit)",
-            )
-
-    ax.set_xlabel(f"{curve['binning_variable']} [GeV]")
-    ax.set_ylabel("Signal efficiency")
-    ax.set_ylim(0.0, 1.05)
-    ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
+    _add_baseline(ax, metrics, centers, bins)
     plot_path = os.path.join(exp_dir, filename)
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    print(f"Saved turn-on plot to {plot_path}")
+    _finish_turn_on_plot(fig, ax, curve, plot_path)
+
+    branches = metrics.get("classifier_branches", {})
+    if branches:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for branch_name, style in (
+            ("nn", {"color": "tab:orange", "linestyle": ":"}),
+            ("tob", {"color": "0.45", "linestyle": "-."}),
+        ):
+            branch = branches.get(branch_name)
+            if branch:
+                ax.plot(
+                    centers,
+                    branch["binned_efficiencies"],
+                    linewidth=1.6,
+                    label=branch["label"],
+                    **style,
+                )
+        _add_baseline(ax, metrics, centers, bins)
+        stem, extension = os.path.splitext(filename)
+        branch_path = os.path.join(
+            exp_dir, f"{stem}_branches{extension or '.png'}"
+        )
+        _finish_turn_on_plot(fig, ax, curve, branch_path)
 
 
 def load_predictions(exp_dir, stem="predictions"):
@@ -263,11 +338,19 @@ def evaluate_experiment(
     output_suffix=None,
     checkpoint_method=None,
     prediction_stem="predictions",
+    classifier_override=None,
 ):
     print(f"\n{'=' * 40}")
     print(f"Evaluating Experiment: {exp_dir}")
     print(f"{'=' * 40}")
 
+    if classifier_override is not None:
+        classifier_suffix = classifier_override.name
+        output_suffix = (
+            f"{output_suffix}_{classifier_suffix}"
+            if output_suffix
+            else classifier_suffix
+        )
     filename_suffix = f"_{output_suffix}" if output_suffix else ""
     metrics_path = os.path.join(exp_dir, f"metrics{filename_suffix}.json")
 
@@ -294,32 +377,54 @@ def evaluate_experiment(
     sig_df = select_truth_tau_objects(df)
     bkg_df = select_background_objects(df)
 
+    config_path = os.path.join(exp_dir, "config.json")
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as source:
+            experiment_config = json.load(source)
+    else:
+        experiment_config = {}
+    classifier_config = (
+        classifier_override
+        if classifier_override is not None
+        else parse_classifier(experiment_config)
+    )
+
     target_fake_rates = [0.005, 0.010, 0.020]
     thresholds = {}
     achieved_fake_rates = {}
     global_efficiencies = {}
+    calibrations = {}
 
     print("Calculating Thresholds and Global Efficiencies...")
-    event_trigger_scores, background_event_count = build_event_trigger_scores(
-        bkg_df, 'nn_score', objects=2
-    )
     for fr in target_fake_rates:
-        threshold, ratio = select_fpr_threshold(
-            event_trigger_scores, background_event_count, fr
+        active_classifier = classifier_config.with_target_fpr(fr)
+        calibration = calibrate_classifier(
+            bkg_df,
+            bkg_df["nn_score"].to_numpy(dtype=np.float64),
+            active_classifier,
         )
-        sig_passed = np.count_nonzero(
-            score_pass_mask(sig_df, 'nn_score', threshold)
-        )
-        eff = sig_passed / len(sig_df) if len(sig_df) > 0 else 0.0
+        passed = classifier_object_pass_mask(sig_df, calibration)
+        eff = float(passed.mean()) if len(sig_df) else 0.0
+        threshold = calibration["nn_threshold"]
+        ratio = calibration["achieved_fpr"]
 
         fr_str = f"{fr * 100:.1f}%"
+        calibrations[fr_str] = calibration
         thresholds[fr_str] = float(threshold)
         achieved_fake_rates[fr_str] = float(ratio)
-        global_efficiencies[fr_str] = float(eff)
+        global_efficiencies[fr_str] = eff
+        threshold_text = f"NN cut: {threshold:9.6g}"
+        if classifier_config.name == "tob_nn_or":
+            threshold_text += (
+                f" | TOB cut: {calibration['tob_threshold_gev']:.4g} GeV"
+            )
         print(
             f"  Target FPR: {fr_str:>4} | Achieved FPR: {ratio * 100:7.4f}% "
-            f"| Cut: {threshold:9.6g} | Signal Eff: {eff:.4f}"
+            f"| {threshold_text} | Signal Eff: {eff:.4f}"
         )
+        background_event_count = calibration["diagnostics"][
+            "background_event_count"
+        ]
         if fr - ratio > (1.0 / background_event_count) + 1e-12:
             print(
                 "    Note: score ties prevent a closer deterministic operating "
@@ -327,7 +432,7 @@ def evaluate_experiment(
             )
 
     target_fr = "0.5%"
-    working_threshold = thresholds[target_fr]
+    working_calibration = calibrations[target_fr]
 
     # Dynamically generate equal-width bins
     eval_bins = np.linspace(pt_min, pt_max, num_bins + 1)
@@ -335,8 +440,11 @@ def evaluate_experiment(
 
     print(
         f"\nCalculating Binned Efficiencies at {target_fr} Fake Rate (using {num_bins} bins from {pt_min} to {pt_max} on '{bin_var}')...")
-    binned_effs, binned_effs_err = calculate_binned_efficiencies(
-        sig_df, 'nn_score', working_threshold, eval_bins, bin_var
+    signal_passed = classifier_object_pass_mask(
+        sig_df, working_calibration
+    )
+    binned_effs, binned_effs_err = calculate_binned_mask_efficiencies(
+        sig_df, signal_passed, eval_bins, bin_var
     )
 
     print("Fitting Fermi-Dirac Function...")
@@ -362,6 +470,9 @@ def evaluate_experiment(
     baseline_threshold, baseline_fpr = select_fpr_threshold(
         baseline_event_scores, baseline_event_count, 0.005
     )
+    baseline_global_efficiency = float(
+        score_pass_mask(sig_df, "tob_pt", baseline_threshold).mean()
+    ) if len(sig_df) else 0.0
     baseline_effs, baseline_errors = calculate_binned_efficiencies(
         sig_df, 'tob_pt', baseline_threshold, eval_bins, bin_var
     )
@@ -375,6 +486,11 @@ def evaluate_experiment(
 
     metrics = {
         "checkpoint_method": checkpoint_method,
+        "classifier": classifier_config.to_dict(),
+        "calibration_split": (
+            "test_exploratory" if classifier_override is not None else "test"
+        ),
+        "classifier_calibrations": calibrations,
         "thresholds_by_fake_rate": thresholds,
         "achieved_fake_rates": achieved_fake_rates,
         "global_efficiency": global_efficiencies,
@@ -396,6 +512,7 @@ def evaluate_experiment(
         "baseline_tob_pt": {
             "threshold": float(baseline_threshold),
             "achieved_fake_rate": float(baseline_fpr),
+            "global_efficiency": baseline_global_efficiency,
             "binned_efficiencies": baseline_effs,
             "binned_efficiencies_err": baseline_errors,
             "fit_success": baseline_fit["fit_success"],
@@ -409,33 +526,73 @@ def evaluate_experiment(
         }
     }
 
+    if classifier_config.name == "tob_nn_or":
+        nn_pass = score_pass_mask(
+            sig_df, "nn_score", working_calibration["nn_threshold"]
+        )
+        tob_values = tob_pt_gev(sig_df)
+        tob_pass = np.isfinite(tob_values) & (
+            tob_values >= working_calibration["tob_threshold_gev"]
+        )
+        nn_effs, nn_errs = calculate_binned_mask_efficiencies(
+            sig_df, nn_pass, eval_bins, bin_var
+        )
+        tob_effs, tob_errs = calculate_binned_mask_efficiencies(
+            sig_df, tob_pass, eval_bins, bin_var
+        )
+        metrics["classifier_branches"] = {
+            "nn": {
+                "label": "NN branch at hybrid cut",
+                "binned_efficiencies": nn_effs,
+                "binned_efficiencies_err": nn_errs,
+            },
+            "tob": {
+                "label": (
+                    f"TOB branch ({classifier_config.tob_fpr * 100:.1f}% budget)"
+                ),
+                "binned_efficiencies": tob_effs,
+                "binned_efficiencies_err": tob_errs,
+            },
+        }
+
     validation_record = _validation_record(exp_dir, checkpoint_method)
     if validation_record and "threshold" in validation_record:
-        fixed_threshold = float(validation_record["threshold"])
-        fixed_event_scores, fixed_event_count = build_event_trigger_scores(
-            bkg_df,
-            "nn_score",
-            objects=int(validation_record.get("trigger_objects", 2)),
+        fixed_calibration = validation_record.get("classifier_calibration")
+        if fixed_calibration is None:
+            fixed_calibration = {
+                "name": "nn_only",
+                "nn_threshold": float(validation_record["threshold"]),
+                "trigger_objects": int(
+                    validation_record.get("trigger_objects", 2)
+                ),
+            }
+        if fixed_calibration["name"] != classifier_config.name:
+            fixed_calibration = None
+
+    else:
+        fixed_calibration = None
+
+    if fixed_calibration is not None:
+        fixed_test_event_pass = classifier_event_pass_mask(
+            bkg_df, fixed_calibration
         )
-        fixed_test_fpr = float(
-            np.count_nonzero(fixed_event_scores >= fixed_threshold)
-            / fixed_event_count
-        )
-        fixed_signal_pass = score_pass_mask(
-            sig_df, "nn_score", fixed_threshold
+        fixed_test_fpr = float(fixed_test_event_pass.mean())
+        fixed_signal_pass = classifier_object_pass_mask(
+            sig_df, fixed_calibration
         )
         fixed_signal_efficiency = (
             float(fixed_signal_pass.mean()) if len(sig_df) else 0.0
         )
-        fixed_binned_effs, fixed_binned_errs = calculate_binned_efficiencies(
-            sig_df,
-            "nn_score",
-            fixed_threshold,
-            eval_bins,
-            bin_var,
+        fixed_binned_effs, fixed_binned_errs = (
+            calculate_binned_mask_efficiencies(
+                sig_df,
+                fixed_signal_pass,
+                eval_bins,
+                bin_var,
+            )
         )
         metrics["validation_calibrated_operating_point"] = {
-            "threshold": fixed_threshold,
+            "classifier_calibration": fixed_calibration,
             "validation": validation_record,
             "test_achieved_fake_rate": fixed_test_fpr,
             "test_signal_efficiency": fixed_signal_efficiency,
@@ -497,6 +654,12 @@ def generate_averaged_metrics(
         avg_baseline_fpr = np.mean(
             [entry["achieved_fake_rate"] for entry in baseline_entries]
         )
+        baseline_global_values = [
+            entry.get("global_efficiency") for entry in baseline_entries
+        ]
+        has_baseline_global = all(
+            value is not None for value in baseline_global_values
+        )
         avg_baseline_effs = np.mean(
             [entry["binned_efficiencies"] for entry in baseline_entries],
             axis=0,
@@ -540,6 +703,8 @@ def generate_averaged_metrics(
 
     metrics_averaged = {
         "checkpoint_method": base.get("checkpoint_method"),
+        "classifier": base.get("classifier", {"name": "nn_only"}),
+        "calibration_split": base.get("calibration_split"),
         "thresholds_by_fake_rate": {k: float(v) for k, v in avg_thresholds.items()},
         "achieved_fake_rates": {k: float(v) for k, v in avg_achieved_fake_rates.items()},
         "global_efficiency": {k: float(v) for k, v in avg_global_effs.items()},
@@ -577,6 +742,33 @@ def generate_averaged_metrics(
             },
             "seeds_averaged": len(all_metrics),
         }
+        if has_baseline_global:
+            metrics_averaged["baseline_tob_pt"]["global_efficiency"] = float(
+                np.mean(baseline_global_values)
+            )
+
+    branch_entries = [m.get("classifier_branches") for m in all_metrics]
+    if all(entry is not None for entry in branch_entries):
+        metrics_averaged["classifier_branches"] = {}
+        for branch_name in branch_entries[0]:
+            metrics_averaged["classifier_branches"][branch_name] = {
+                "label": branch_entries[0][branch_name]["label"],
+                "binned_efficiencies": np.mean(
+                    [
+                        entry[branch_name]["binned_efficiencies"]
+                        for entry in branch_entries
+                    ],
+                    axis=0,
+                ).tolist(),
+                "binned_efficiencies_err": np.mean(
+                    [
+                        entry[branch_name]["binned_efficiencies_err"]
+                        for entry in branch_entries
+                    ],
+                    axis=0,
+                ).tolist(),
+                "seeds_averaged": len(all_metrics),
+            }
 
     for folder in folders:
         with open(os.path.join(folder, output_filename), 'w') as f:
@@ -585,6 +777,21 @@ def generate_averaged_metrics(
 
 def main():
     args = parse_args()
+
+    classifier_override = None
+    if args.classifier:
+        override_config = {
+            "classifier": {
+                "name": args.classifier,
+                "target_fpr": 0.005,
+                "trigger_objects": 2,
+            }
+        }
+        if args.classifier == "tob_nn_or":
+            override_config["classifier"]["tob_fpr"] = (
+                args.classifier_tob_fpr
+            )
+        classifier_override = parse_classifier(override_config)
 
     base_dir = os.path.abspath(args.experiments_dir)
 
@@ -602,6 +809,7 @@ def main():
                 output_suffix=suffix,
                 checkpoint_method=method,
                 prediction_stem=stem,
+                classifier_override=classifier_override,
             )
         base_dir = os.path.dirname(experiment_dir)
     else:
@@ -627,6 +835,7 @@ def main():
                         output_suffix=suffix,
                         checkpoint_method=method,
                         prediction_stem=stem,
+                        classifier_override=classifier_override,
                     )
 
     # 2. Always group and average the seeds afterward
@@ -646,6 +855,12 @@ def main():
             exp_name = config.get("experiment_name", "unknown")
             variants = discover_checkpoint_variants(item_path)
             for suffix, method, _ in variants:
+                if classifier_override is not None:
+                    suffix = (
+                        f"{suffix}_{classifier_override.name}"
+                        if suffix
+                        else classifier_override.name
+                    )
                 filename_suffix = f"_{suffix}" if suffix else ""
                 metrics_filename = f"metrics{filename_suffix}.json"
                 metrics_path = os.path.join(item_path, metrics_filename)

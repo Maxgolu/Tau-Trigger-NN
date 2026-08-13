@@ -5,11 +5,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from classifiers import (
+    classifier_object_pass_mask,
+    calibrate_classifier,
+    parse_classifier,
+)
 from operating_point import (
-    build_event_trigger_scores,
-    score_pass_mask,
     select_background_objects,
-    select_fpr_threshold,
     select_truth_tau_objects,
 )
 
@@ -81,6 +83,7 @@ def calculate_validation_operating_point(
     target_fpr=0.005,
     trigger_objects=2,
     energy_bands_gev=DEFAULT_ENERGY_BANDS_GEV,
+    classifier_config=None,
 ):
     """Calibrate validation FPR and measure truth-tau efficiency."""
     frame = validation_frame.copy()
@@ -88,17 +91,25 @@ def calculate_validation_operating_point(
     background = select_background_objects(frame)
     signal = select_truth_tau_objects(frame)
 
-    event_scores, event_count = build_event_trigger_scores(
+    if classifier_config is None:
+        classifier_config = parse_classifier(
+            {
+                "classifier": {
+                    "name": "nn_only",
+                    "target_fpr": target_fpr,
+                    "trigger_objects": trigger_objects,
+                }
+            }
+        )
+    else:
+        classifier_config = classifier_config.with_target_fpr(target_fpr)
+
+    calibration = calibrate_classifier(
         background,
-        "nn_score",
-        objects=trigger_objects,
+        background["nn_score"].to_numpy(dtype=np.float64),
+        classifier_config,
     )
-    threshold, achieved_fpr = select_fpr_threshold(
-        event_scores,
-        event_count,
-        target_fpr,
-    )
-    passed = score_pass_mask(signal, "nn_score", threshold)
+    passed = classifier_object_pass_mask(signal, calibration)
     global_efficiency = float(passed.mean()) if len(signal) else 0.0
 
     truth_pt = _truth_pt_gev(signal["truth_pt"].to_numpy())
@@ -111,14 +122,18 @@ def calculate_validation_operating_point(
         )
 
     return {
-        "threshold": float(threshold),
+        # threshold remains for readers of legacy NN-only manifests.
+        "threshold": float(calibration["nn_threshold"]),
         "target_fpr": float(target_fpr),
-        "achieved_fpr": float(achieved_fpr),
+        "achieved_fpr": float(calibration["achieved_fpr"]),
         "signal_efficiency": global_efficiency,
         "energy_band_efficiencies": energy_efficiencies,
-        "background_event_count": int(event_count),
+        "background_event_count": int(
+            calibration["diagnostics"]["background_event_count"]
+        ),
         "signal_object_count": int(len(signal)),
-        "trigger_objects": int(trigger_objects),
+        "trigger_objects": int(classifier_config.trigger_objects),
+        "classifier_calibration": calibration,
     }
 
 

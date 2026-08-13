@@ -36,6 +36,8 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── tracker.py               # Experiment tracking and artifact archiving
 │   ├── training_data.py         # Reusable data loading, alignment, event splitting, and in-memory caching
 │   ├── operating_point.py       # Shared event-level FPR threshold calculations
+│   ├── classifiers.py           # Configurable NN-only and TOB-NN OR trigger decisions
+│   ├── losses.py                # Configurable training-loss construction
 │   ├── checkpoint_selection.py  # Configurable validation checkpoint selection
 │   └── train.py                 # Main training loop and configuration-sweep orchestration
 ├── tests/                       # Automated correctness checks for reusable project logic
@@ -43,6 +45,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_evaluate_thresholds.py # Event-level threshold calibration regression tests
 │   ├── test_features.py         # Object-specific geometry and feature regression tests
 │   ├── test_checkpoint_selection.py # Validation checkpoint-selection regression tests
+│   ├── test_classifiers.py      # Classifier calibration, FPR, and composition tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
@@ -112,6 +115,21 @@ python generate_configs.py --output-dir configs/checkpoint_study \
   --checkpoint-target-fpr 0.005
 ```
 
+The final trigger classifier and training loss are configured independently.
+Legacy configs default to `nn_only` with BCE. The hybrid classifier accepts an
+object when either its TOB pT or its network score passes the calibrated cut:
+
+```bash
+python generate_configs.py --output-dir configs/or_study \
+  --feature-set "em0_sum,em1_sum,em2_3x3_sum,em3_sum,had_sum" \
+  --seeds 42 123 456 \
+  --classifier tob_nn_or \
+  --classifier-target-fpr 0.005 \
+  --classifier-tob-fpr 0.004 \
+  --loss bce \
+  --checkpoint-method target_fpr
+```
+
 ### Step 2: Train the Network
 Main training script. 
 Standard usage is giving it a config directory, and it will generate an "experiment" folder for each JSON config file within that directory.
@@ -144,7 +162,7 @@ python src/train.py --config configs/smoke_s42.json
 When both checkpoint methods are enabled, the primary method keeps the standard
 artifact names. The secondary method receives a method suffix.
 `checkpoint_selection.json` records the best epochs, validation threshold,
-achieved FPR, and signal efficiencies.
+achieved FPR, signal efficiencies, classifier calibration, and selected loss.
 
 ### Step 3: Run Physics Evaluation
 Extract event-level thresholds, calculate efficiencies, and perform Fermi-Dirac curve fitting.
@@ -155,6 +173,20 @@ already contain `metrics.json`. Each evaluated run also receives `turn_on_curve.
 ```bash
 python src/evaluate.py
 ```
+
+The hybrid classifier can also be explored on existing predictions without
+retraining. These post-hoc results use a separate suffix and do not overwrite
+the original metrics. Their thresholds are calibrated on the evaluated test
+sample, so they are intended for hypothesis generation rather than final
+unbiased reporting:
+
+```bash
+python src/evaluate.py --experiments_dir experiments/batch_name \
+  --classifier tob_nn_or --classifier-tob-fpr 0.004 --recalc
+```
+
+Hybrid evaluation saves two turn-on plots: the configured classifier against
+the TOB baseline, and a separate branch diagnostic showing NN and TOB branches.
 
 ### Step 4: Analyze Results
 Launch Jupyter Notebook to aggregate and visualize the findings.
@@ -193,7 +225,13 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * The architecture concatenates the requested features into an initial input dimension and constructs the hidden layers dynamically based on the configuration array (e.g., `[32, 16]`).  
 * It utilizes ReLU activations for hidden layers and a final Sigmoid activation for binary classification.  
 
-### 4. Evaluation & Metrics (`src/evaluate.py`)
+### 4. Classifiers and Losses (`src/classifiers.py`, `src/losses.py`)
+* **Independent configuration:** The final classifier and training loss use separate config sections, so every classifier can be combined with future losses.
+* **Legacy classifier:** `nn_only` applies the calibrated network-score threshold and remains the default for old configs.
+* **Hybrid classifier:** `tob_nn_or` accepts each object when either the TOB-pT branch or NN branch passes. Both thresholds are calibrated at event level, including mixed events where each branch contributes one accepted object.
+* **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
+
+### 5. Evaluation & Metrics (`src/evaluate.py`)
 The evaluation script operates on the `predictions.parquet` files generated during testing.  
 * Converts kinematic constraints (like `tob_pt` and `truth_pt`) from MeV to GeV.  
 * Calibrates each score threshold at the event level. For the two-object trigger, an event passes when at least two objects satisfy `score >= threshold`; equivalently, the threshold is compared with the event's second-highest object score.

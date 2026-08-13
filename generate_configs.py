@@ -59,6 +59,30 @@ def parse_args():
         default=0.005,
         help="Validation event FPR used by target_fpr selection (default: 0.005).",
     )
+    parser.add_argument(
+        "--classifier",
+        choices=["nn_only", "tob_nn_or"],
+        default=None,
+        help="Final trigger classifier (default: legacy nn_only).",
+    )
+    parser.add_argument(
+        "--classifier-target-fpr",
+        type=float,
+        default=0.005,
+        help="Total event FPR for the classifier (default: 0.005).",
+    )
+    parser.add_argument(
+        "--classifier-tob-fpr",
+        type=float,
+        default=0.004,
+        help="TOB branch event-FPR budget for tob_nn_or (default: 0.004).",
+    )
+    parser.add_argument(
+        "--loss",
+        choices=["bce"],
+        default=None,
+        help="Training loss (default: legacy bce).",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +116,8 @@ def generate_sweep_configs(
     feature_sets=None,
     seeds=None,
     checkpoint_selection=None,
+    classifier=None,
+    loss=None,
 ):
     base_config = {"epochs": 20}
     learning_rates = [0.001]
@@ -132,6 +158,10 @@ def generate_sweep_configs(
             )
             if checkpoint_selection is not None:
                 config["checkpoint_selection"] = checkpoint_selection
+            if classifier is not None:
+                config["classifier"] = classifier
+            if loss is not None:
+                config["loss"] = loss
             filename = f"c{config_number:03d}_s{seed}.json"
             write_config(config, output_dir, filename)
             count += 1
@@ -167,9 +197,23 @@ if __name__ == "__main__":
                 "target_fpr": args.checkpoint_target_fpr,
             }
 
+        classifier = None
+        if args.classifier:
+            classifier = {
+                "name": args.classifier,
+                "target_fpr": args.classifier_target_fpr,
+                "trigger_objects": 2,
+            }
+            if args.classifier == "tob_nn_or":
+                classifier["tob_fpr"] = args.classifier_tob_fpr
+
+        loss = {"name": args.loss} if args.loss else None
+
         generate_sweep_configs(
             output_dir=args.output_dir,
             feature_sets=requested_feature_sets,
             seeds=args.seeds,
             checkpoint_selection=checkpoint_selection,
+            classifier=classifier,
+            loss=loss,
         )
