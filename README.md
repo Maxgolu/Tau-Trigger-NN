@@ -37,6 +37,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── training_data.py         # Reusable data loading, alignment, event splitting, and in-memory caching
 │   ├── operating_point.py       # Shared event-level FPR threshold calculations
 │   ├── classifiers.py           # Configurable NN-only and TOB-NN OR trigger decisions
+│   ├── classifier_selection.py  # Cross-fitted validation search for the TOB branch budget
 │   ├── losses.py                # Configurable training-loss construction
 │   ├── checkpoint_selection.py  # Configurable validation checkpoint selection
 │   └── train.py                 # Main training loop and configuration-sweep orchestration
@@ -46,6 +47,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_features.py         # Object-specific geometry and feature regression tests
 │   ├── test_checkpoint_selection.py # Validation checkpoint-selection regression tests
 │   ├── test_classifiers.py      # Classifier calibration, FPR, and composition tests
+│   ├── test_classifier_selection.py # TOB-budget search and validation-fold tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
@@ -129,6 +131,21 @@ python generate_configs.py --output-dir configs/or_study \
   --loss bce \
   --checkpoint-method target_fpr
 ```
+
+The TOB budget can also be selected independently for every feature set. The
+search uses two event-level validation folds and never uses test data:
+
+```bash
+python generate_configs.py --output-dir configs/or_budget_search \
+  --feature-set "em0_sum,em1_sum,em2_3x3_sum,em3_sum,had_sum" \
+  --seeds 42 123 456 \
+  --classifier tob_nn_or \
+  --classifier-tob-budget-mode validation_search \
+  --checkpoint-method target_fpr
+```
+
+Candidate budgets and objective limits can be changed through the
+`--classifier-tob-budget-*` and `--classifier-objective-*` options.
 
 ### Step 2: Train the Network
 Main training script. 
@@ -229,6 +246,7 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * **Independent configuration:** The final classifier and training loss use separate config sections, so every classifier can be combined with future losses.
 * **Legacy classifier:** `nn_only` applies the calibrated network-score threshold and remains the default for old configs.
 * **Hybrid classifier:** `tob_nn_or` accepts each object when either the TOB-pT branch or NN branch passes. Both thresholds are calibrated at event level, including mixed events where each branch contributes one accepted object.
+* **TOB-budget search:** `validation_search` jointly selects the checkpoint and TOB budget. Complete events stay together in deterministic cross-fitting folds. The objective maximizes the mean OR-minus-baseline efficiency from 25 to 100 GeV while protecting every 5-GeV window from 25 to 120 GeV.
 * **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
 
 ### 5. Evaluation & Metrics (`src/evaluate.py`)

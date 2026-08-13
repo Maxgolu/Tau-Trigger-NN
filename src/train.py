@@ -13,6 +13,10 @@ from pathlib import Path
 
 from model import DynamicMLP
 from classifiers import parse_classifier
+from classifier_selection import (
+    build_validation_folds,
+    search_validation_tob_budget,
+)
 from losses import build_loss, parse_loss
 from tracker import ExperimentTracker
 from training_data import TrainingDataCache
@@ -247,6 +251,18 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         "target_fpr" in selection.methods
         or classifier_config.name != "nn_only"
     )
+    validation_fold_ids = None
+    validation_fold_audit = None
+    if classifier_config.tob_budget is not None:
+        validation_fold_ids, validation_fold_audit = build_validation_folds(
+            df_val_meta,
+            seed=seed,
+            folds=classifier_config.tob_budget.cross_validation_folds,
+        )
+        print(
+            "TOB budget: validation search with "
+            f"{len(classifier_config.tob_budget.values)} candidates"
+        )
     print(f"Starting training for {epochs} epochs...")
     print(
         f"Classifier: {classifier_config.name} | Loss: {loss_config.name}"
@@ -312,14 +328,23 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         }
 
         if needs_operating_point:
-            operating_point = calculate_validation_operating_point(
-                df_val_meta,
-                validation_scores,
-                target_fpr=selection.target_fpr,
-                trigger_objects=selection.trigger_objects,
-                energy_bands_gev=selection.energy_bands_gev,
-                classifier_config=classifier_config,
-            )
+            if classifier_config.tob_budget is not None:
+                operating_point = search_validation_tob_budget(
+                    df_val_meta,
+                    validation_scores,
+                    classifier_config,
+                    validation_fold_ids,
+                    validation_fold_audit,
+                )
+            else:
+                operating_point = calculate_validation_operating_point(
+                    df_val_meta,
+                    validation_scores,
+                    target_fpr=selection.target_fpr,
+                    trigger_objects=selection.trigger_objects,
+                    energy_bands_gev=selection.energy_bands_gev,
+                    classifier_config=classifier_config,
+                )
             epoch_record.update(operating_point)
 
         message = (
@@ -334,6 +359,12 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
                 f"{epoch_record['signal_efficiency']:.4f} "
                 f"(achieved {epoch_record['achieved_fpr'] * 100:.4f}%)"
             )
+            if classifier_config.tob_budget is not None:
+                message += (
+                    f" | b={epoch_record['selected_tob_fpr']:.4f} "
+                    f"| J={epoch_record['objective_value']:.4f} "
+                    f"| feasible={epoch_record['noninferiority_satisfied']}"
+                )
         print(message)
 
         for method in selection.methods:
@@ -358,6 +389,40 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     artifacts = {}
     for method in selection.methods:
         model.load_state_dict(best_weights[method])
+        if classifier_config.tob_budget is not None:
+            # Cross-fitting selects the epoch and budget. This final pass only
+            # calibrates deployable thresholds on the complete validation set.
+            validation_scores = predict_scores(model, val_loader, device)
+            selected_tob_fpr = best_records[method]["selected_tob_fpr"]
+            concrete_classifier = classifier_config.with_tob_fpr(
+                selected_tob_fpr
+            )
+            final_validation = calculate_validation_operating_point(
+                df_val_meta,
+                validation_scores,
+                target_fpr=selection.target_fpr,
+                trigger_objects=selection.trigger_objects,
+                energy_bands_gev=selection.energy_bands_gev,
+                classifier_config=concrete_classifier,
+            )
+            cross_fitted = {
+                key: copy.deepcopy(best_records[method][key])
+                for key in (
+                    "achieved_fpr",
+                    "signal_efficiency",
+                    "objective_value",
+                    "minimum_delta",
+                    "noninferiority_satisfied",
+                    "tob_budget_search",
+                )
+            }
+            best_records[method].update(final_validation)
+            best_records[method]["selected_tob_fpr"] = selected_tob_fpr
+            best_records[method]["cross_fitted_selection"] = cross_fitted
+            best_records[method]["final_validation_calibration"] = {
+                "selected_tob_fpr": selected_tob_fpr,
+                "thresholds": final_validation["classifier_calibration"],
+            }
         scores = predict_scores(model, test_loader, device)
         method_frame = df_test_meta.copy()
         method_frame["nn_score"] = scores

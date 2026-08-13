@@ -95,6 +95,29 @@ class CheckpointSelectionTests(unittest.TestCase):
             )
         )
 
+    def test_target_fpr_prefers_feasible_search_checkpoint(self):
+        objective = {"objective_tie_tolerance": 0.002}
+        infeasible = {
+            "validation_bce": 0.05,
+            "noninferiority_satisfied": False,
+            "minimum_delta": 0.10,
+            "objective_value": 0.10,
+            "selected_tob_fpr": 0.004,
+            "tob_budget_search": {"objective": objective},
+        }
+        feasible = {
+            "validation_bce": 0.10,
+            "noninferiority_satisfied": True,
+            "minimum_delta": -0.004,
+            "objective_value": 0.01,
+            "selected_tob_fpr": 0.002,
+            "tob_budget_search": {"objective": objective},
+        }
+
+        self.assertTrue(
+            is_better_checkpoint("target_fpr", feasible, infeasible)
+        )
+
     def test_target_fpr_can_select_the_or_classifier(self):
         background_events = 1000
         background = pd.DataFrame(

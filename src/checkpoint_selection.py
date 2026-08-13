@@ -144,6 +144,44 @@ def is_better_checkpoint(method, candidate, best):
     if method == "validation_bce":
         return candidate["validation_bce"] < best["validation_bce"]
     if method == "target_fpr":
+        if "tob_budget_search" in candidate:
+            candidate_feasible = candidate["noninferiority_satisfied"]
+            best_feasible = best["noninferiority_satisfied"]
+            if candidate_feasible != best_feasible:
+                return candidate_feasible
+            tie_tolerance = candidate["tob_budget_search"]["objective"][
+                "objective_tie_tolerance"
+            ]
+            objective_difference = (
+                candidate["objective_value"] - best["objective_value"]
+            )
+            if candidate_feasible and abs(objective_difference) > tie_tolerance:
+                return objective_difference > 0.0
+            if candidate_feasible:
+                candidate_key = (
+                    candidate["minimum_delta"],
+                    candidate["selected_tob_fpr"],
+                    -candidate["validation_bce"],
+                )
+                best_key = (
+                    best["minimum_delta"],
+                    best["selected_tob_fpr"],
+                    -best["validation_bce"],
+                )
+            else:
+                candidate_key = (
+                    candidate["minimum_delta"],
+                    candidate["objective_value"],
+                    candidate["selected_tob_fpr"],
+                    -candidate["validation_bce"],
+                )
+                best_key = (
+                    best["minimum_delta"],
+                    best["objective_value"],
+                    best["selected_tob_fpr"],
+                    -best["validation_bce"],
+                )
+            return candidate_key > best_key
         candidate_key = (
             candidate["signal_efficiency"],
             candidate["achieved_fpr"],

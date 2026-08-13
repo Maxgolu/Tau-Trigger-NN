@@ -57,6 +57,30 @@ class ClassifierConfigTests(unittest.TestCase):
                 }
             )
 
+    def test_validation_search_is_parsed_without_changing_fixed_mode(self):
+        fixed = parse_classifier(
+            {"classifier": {"name": "tob_nn_or", "tob_fpr": 0.004}}
+        )
+        searched = parse_classifier(
+            {
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "target_fpr": 0.005,
+                    "tob_budget": {
+                        "mode": "validation_search",
+                        "values": [0.0, 0.002, 0.004],
+                        "cross_validation_folds": 2,
+                    },
+                }
+            }
+        )
+
+        self.assertEqual(fixed.tob_fpr, 0.004)
+        self.assertIsNone(fixed.tob_budget)
+        self.assertIsNone(searched.tob_fpr)
+        self.assertEqual(searched.tob_budget.values, (0.0, 0.002, 0.004))
+        self.assertEqual(searched.with_tob_fpr(0.002).tob_fpr, 0.002)
+
 
 class OrClassifierTests(unittest.TestCase):
     def test_object_or_accepts_either_branch(self):

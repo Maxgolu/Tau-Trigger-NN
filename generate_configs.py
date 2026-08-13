@@ -78,6 +78,56 @@ def parse_args():
         help="TOB branch event-FPR budget for tob_nn_or (default: 0.004).",
     )
     parser.add_argument(
+        "--classifier-tob-budget-mode",
+        choices=["fixed", "validation_search"],
+        default="fixed",
+        help="Use a fixed TOB budget or select it on validation data.",
+    )
+    parser.add_argument(
+        "--classifier-tob-budget-values",
+        nargs="+",
+        type=float,
+        default=[0.0, 0.0005, 0.001, 0.0015, 0.002, 0.0025,
+                 0.003, 0.0035, 0.004, 0.0045, 0.005],
+        help="Candidate TOB event-FPR budgets for validation search.",
+    )
+    parser.add_argument(
+        "--classifier-tob-budget-folds",
+        type=int,
+        default=2,
+        help="Validation cross-fitting folds for TOB-budget search (default: 2).",
+    )
+    parser.add_argument(
+        "--classifier-objective-min-pt",
+        type=float,
+        default=25.0,
+        help="Lowest protected truth-pT value in GeV (default: 25).",
+    )
+    parser.add_argument(
+        "--classifier-objective-max-pt",
+        type=float,
+        default=100.0,
+        help="Upper truth-pT edge included in the mean objective (default: 100).",
+    )
+    parser.add_argument(
+        "--classifier-objective-window-width",
+        type=float,
+        default=5.0,
+        help="Truth-pT comparison-window width in GeV (default: 5).",
+    )
+    parser.add_argument(
+        "--classifier-noninferiority-tolerance",
+        type=float,
+        default=0.005,
+        help="Allowed efficiency deficit per protected window (default: 0.005).",
+    )
+    parser.add_argument(
+        "--classifier-objective-tie-tolerance",
+        type=float,
+        default=0.002,
+        help="Objective difference treated as a tie (default: 0.002).",
+    )
+    parser.add_argument(
         "--loss",
         choices=["bce"],
         default=None,
@@ -205,7 +255,25 @@ if __name__ == "__main__":
                 "trigger_objects": 2,
             }
             if args.classifier == "tob_nn_or":
-                classifier["tob_fpr"] = args.classifier_tob_fpr
+                if args.classifier_tob_budget_mode == "fixed":
+                    classifier["tob_fpr"] = args.classifier_tob_fpr
+                else:
+                    classifier["tob_budget"] = {
+                        "mode": "validation_search",
+                        "values": args.classifier_tob_budget_values,
+                        "cross_validation_folds": args.classifier_tob_budget_folds,
+                        "objective": {
+                            "min_truth_pt_gev": args.classifier_objective_min_pt,
+                            "objective_max_truth_pt_gev": args.classifier_objective_max_pt,
+                            "window_width_gev": args.classifier_objective_window_width,
+                            "noninferiority_tolerance": args.classifier_noninferiority_tolerance,
+                            "objective_tie_tolerance": args.classifier_objective_tie_tolerance,
+                        },
+                    }
+            elif args.classifier_tob_budget_mode != "fixed":
+                raise ValueError(
+                    "TOB-budget search requires --classifier tob_nn_or"
+                )
 
         loss = {"name": args.loss} if args.loss else None
 

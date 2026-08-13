@@ -16,16 +16,38 @@ VALID_CLASSIFIERS = ("nn_only", "tob_nn_or")
 
 
 @dataclass(frozen=True)
+class TobBudgetObjectiveConfig:
+    min_truth_pt_gev: float
+    objective_max_truth_pt_gev: float
+    window_width_gev: float
+    noninferiority_tolerance: float
+    objective_tie_tolerance: float
+
+
+@dataclass(frozen=True)
+class TobBudgetSearchConfig:
+    mode: str
+    values: tuple[float, ...]
+    cross_validation_folds: int
+    objective: TobBudgetObjectiveConfig
+
+
+@dataclass(frozen=True)
 class ClassifierConfig:
     name: str
     target_fpr: float
     trigger_objects: int
     tob_fpr: float | None
     composition: str
+    tob_budget: TobBudgetSearchConfig | None = None
 
     def with_target_fpr(self, target_fpr):
         """Return the same classifier evaluated at another total FPR."""
         return replace(self, target_fpr=float(target_fpr))
+
+    def with_tob_fpr(self, tob_fpr):
+        """Return a concrete OR classifier for one TOB budget."""
+        return replace(self, tob_fpr=float(tob_fpr))
 
     def to_dict(self):
         return asdict(self)
@@ -51,12 +73,58 @@ def parse_classifier(config):
         raise ValueError("Only classifier.composition='object_or' is supported")
 
     tob_fpr = raw.get("tob_fpr")
+    tob_budget = None
     if name == "tob_nn_or":
-        tob_fpr = float(0.004 if tob_fpr is None else tob_fpr)
-        if not 0.0 <= tob_fpr <= target_fpr:
-            raise ValueError(
-                "classifier.tob_fpr must be between zero and target_fpr"
+        raw_budget = raw.get("tob_budget")
+        if raw_budget and raw_budget.get("mode") == "validation_search":
+            values = tuple(float(value) for value in raw_budget.get("values", ()))
+            if not values:
+                raise ValueError("classifier.tob_budget.values cannot be empty")
+            if len(set(values)) != len(values):
+                raise ValueError("classifier.tob_budget.values cannot contain duplicates")
+            if any(value < 0.0 or value > target_fpr for value in values):
+                raise ValueError(
+                    "Every TOB budget must be between zero and target_fpr"
+                )
+            folds = int(raw_budget.get("cross_validation_folds", 2))
+            if folds != 2:
+                raise ValueError("TOB budget search currently requires exactly 2 folds")
+            raw_objective = raw_budget.get("objective", {})
+            objective = TobBudgetObjectiveConfig(
+                min_truth_pt_gev=float(raw_objective.get("min_truth_pt_gev", 25.0)),
+                objective_max_truth_pt_gev=float(
+                    raw_objective.get("objective_max_truth_pt_gev", 100.0)
+                ),
+                window_width_gev=float(raw_objective.get("window_width_gev", 5.0)),
+                noninferiority_tolerance=float(
+                    raw_objective.get("noninferiority_tolerance", 0.005)
+                ),
+                objective_tie_tolerance=float(
+                    raw_objective.get("objective_tie_tolerance", 0.002)
+                ),
             )
+            if not (
+                objective.min_truth_pt_gev < objective.objective_max_truth_pt_gev
+                and objective.window_width_gev > 0.0
+                and objective.noninferiority_tolerance >= 0.0
+                and objective.objective_tie_tolerance >= 0.0
+            ):
+                raise ValueError("Invalid classifier.tob_budget.objective settings")
+            tob_budget = TobBudgetSearchConfig(
+                mode="validation_search",
+                values=tuple(sorted(values)),
+                cross_validation_folds=folds,
+                objective=objective,
+            )
+            tob_fpr = None
+        else:
+            if raw_budget and raw_budget.get("mode", "fixed") != "fixed":
+                raise ValueError("Unknown classifier.tob_budget.mode")
+            tob_fpr = float(0.004 if tob_fpr is None else tob_fpr)
+            if not 0.0 <= tob_fpr <= target_fpr:
+                raise ValueError(
+                    "classifier.tob_fpr must be between zero and target_fpr"
+                )
     else:
         tob_fpr = None
 
@@ -66,6 +134,7 @@ def parse_classifier(config):
         trigger_objects=trigger_objects,
         tob_fpr=tob_fpr,
         composition=composition,
+        tob_budget=tob_budget,
     )
 
 
@@ -275,6 +344,10 @@ def calibrate_classifier(
             "achieved_fpr": achieved_fpr,
         }
     else:
+        if classifier.tob_fpr is None:
+            raise ValueError(
+                "A concrete tob_fpr is required before classifier calibration"
+            )
         tob_frame = frame.copy()
         tob_frame["_tob_pt_gev"] = tob_pt_gev(tob_frame)
         tob_scores, event_count = build_event_trigger_scores(

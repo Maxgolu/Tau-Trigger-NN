@@ -388,28 +388,54 @@ def evaluate_experiment(
         if classifier_override is not None
         else parse_classifier(experiment_config)
     )
+    validation_record = _validation_record(exp_dir, checkpoint_method)
+    if classifier_config.tob_budget is not None:
+        if not validation_record or "selected_tob_fpr" not in validation_record:
+            raise ValueError(
+                "Validation-search classifier is missing its selected TOB budget"
+            )
+        classifier_config = classifier_config.with_tob_fpr(
+            validation_record["selected_tob_fpr"]
+        )
 
     target_fake_rates = [0.005, 0.010, 0.020]
     thresholds = {}
     achieved_fake_rates = {}
     global_efficiencies = {}
     calibrations = {}
+    calibration_sources = {}
 
     print("Calculating Thresholds and Global Efficiencies...")
     for fr in target_fake_rates:
         active_classifier = classifier_config.with_target_fpr(fr)
-        calibration = calibrate_classifier(
-            bkg_df,
-            bkg_df["nn_score"].to_numpy(dtype=np.float64),
-            active_classifier,
+        use_validation_calibration = (
+            classifier_config.tob_budget is not None
+            and classifier_override is None
+            and np.isclose(fr, classifier_config.target_fpr)
+            and validation_record
+            and validation_record.get("classifier_calibration")
         )
+        if use_validation_calibration:
+            calibration = validation_record["classifier_calibration"]
+            ratio = float(
+                classifier_event_pass_mask(bkg_df, calibration).mean()
+            )
+        else:
+            calibration = calibrate_classifier(
+                bkg_df,
+                bkg_df["nn_score"].to_numpy(dtype=np.float64),
+                active_classifier,
+            )
+            ratio = calibration["achieved_fpr"]
         passed = classifier_object_pass_mask(sig_df, calibration)
         eff = float(passed.mean()) if len(sig_df) else 0.0
         threshold = calibration["nn_threshold"]
-        ratio = calibration["achieved_fpr"]
 
         fr_str = f"{fr * 100:.1f}%"
         calibrations[fr_str] = calibration
+        calibration_sources[fr_str] = (
+            "validation" if use_validation_calibration else "test"
+        )
         thresholds[fr_str] = float(threshold)
         achieved_fake_rates[fr_str] = float(ratio)
         global_efficiencies[fr_str] = eff
@@ -422,9 +448,11 @@ def evaluate_experiment(
             f"  Target FPR: {fr_str:>4} | Achieved FPR: {ratio * 100:7.4f}% "
             f"| {threshold_text} | Signal Eff: {eff:.4f}"
         )
-        background_event_count = calibration["diagnostics"][
-            "background_event_count"
-        ]
+        background_event_count = (
+            int(bkg_df["eventNumber"].nunique())
+            if use_validation_calibration
+            else calibration["diagnostics"]["background_event_count"]
+        )
         if fr - ratio > (1.0 / background_event_count) + 1e-12:
             print(
                 "    Note: score ties prevent a closer deterministic operating "
@@ -488,9 +516,16 @@ def evaluate_experiment(
         "checkpoint_method": checkpoint_method,
         "classifier": classifier_config.to_dict(),
         "calibration_split": (
-            "test_exploratory" if classifier_override is not None else "test"
+            "test_exploratory"
+            if classifier_override is not None
+            else (
+                "validation_at_target_fpr"
+                if classifier_config.tob_budget is not None
+                else "test"
+            )
         ),
         "classifier_calibrations": calibrations,
+        "calibration_source_by_fake_rate": calibration_sources,
         "thresholds_by_fake_rate": thresholds,
         "achieved_fake_rates": achieved_fake_rates,
         "global_efficiency": global_efficiencies,
@@ -548,14 +583,13 @@ def evaluate_experiment(
             },
             "tob": {
                 "label": (
-                    f"TOB branch ({classifier_config.tob_fpr * 100:.1f}% budget)"
+                    f"TOB branch ({working_calibration['tob_fpr_budget'] * 100:.1f}% budget)"
                 ),
                 "binned_efficiencies": tob_effs,
                 "binned_efficiencies_err": tob_errs,
             },
         }
 
-    validation_record = _validation_record(exp_dir, checkpoint_method)
     if validation_record and "threshold" in validation_record:
         fixed_calibration = validation_record.get("classifier_calibration")
         if fixed_calibration is None:
