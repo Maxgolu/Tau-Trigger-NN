@@ -185,6 +185,10 @@ achieved FPR, signal efficiencies, classifier calibration, and selected loss.
 Extract event-level thresholds, calculate efficiencies, and perform Fermi-Dirac curve fitting.
 Generates a `metrics.json` file containing both the requested and actually achieved
 background fake rates within every experiment folder.
+The main turn-on curve recalibrates both the configured classifier and the TOB
+baseline on the evaluated background sample. This gives both curves the same
+requested event FPR. For trained checkpoints, `metrics.json` also keeps the
+validation-calibrated operating point as a separate generalization diagnostic.
 By default, it scans the project-local `experiments/` directory and skips runs that
 already contain `metrics.json`. Each evaluated run also receives `turn_on_curve.png`.
 ```bash
@@ -193,9 +197,8 @@ python src/evaluate.py
 
 The hybrid classifier can also be explored on existing predictions without
 retraining. These post-hoc results use a separate suffix and do not overwrite
-the original metrics. Their thresholds are calibrated on the evaluated test
-sample, so they are intended for hypothesis generation rather than final
-unbiased reporting:
+the original metrics. Their thresholds use the same test recalibration policy as
+the standard turn-on comparison:
 
 ```bash
 python src/evaluate.py --experiments_dir experiments/batch_name \

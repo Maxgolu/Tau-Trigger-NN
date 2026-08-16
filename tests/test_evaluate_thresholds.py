@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -18,10 +19,113 @@ from evaluate import (
     select_fpr_threshold,
     select_truth_tau_objects,
     discover_checkpoint_variants,
+    evaluate_experiment,
 )
 
 
 class ThresholdCalibrationTests(unittest.TestCase):
+    def test_primary_dynamic_or_and_baseline_share_test_recalibration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            background_events = np.repeat(np.arange(1000), 2)
+            background_rank = np.repeat(np.arange(1000), 2)
+            background = pd.DataFrame(
+                {
+                    "eventNumber": background_events,
+                    "Type": "BKG",
+                    "signal": 0,
+                    "tob_pt": 1_000_000.0 - 100.0 * background_rank,
+                    "truth_pt": 0.0,
+                    "nn_score": 1.0 - background_rank / 1000.0,
+                }
+            )
+            signal_count = 100
+            signal = pd.DataFrame(
+                {
+                    "eventNumber": np.arange(2000, 2000 + signal_count),
+                    "Type": "Signal",
+                    "signal": 1,
+                    "tob_pt": np.linspace(10_000.0, 120_000.0, signal_count),
+                    "truth_pt": np.linspace(10_000.0, 120_000.0, signal_count),
+                    "nn_score": np.linspace(0.0, 1.0, signal_count),
+                }
+            )
+            pd.concat([background, signal], ignore_index=True).to_csv(
+                folder / "predictions.csv", index=False
+            )
+            config = {
+                "experiment_name": "test_dynamic_or",
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "target_fpr": 0.005,
+                    "trigger_objects": 2,
+                    "tob_budget": {
+                        "mode": "validation_search",
+                        "values": [0.0, 0.002, 0.005],
+                    },
+                },
+            }
+            with open(folder / "config.json", "w") as output:
+                json.dump(config, output)
+            validation_calibration = {
+                "name": "tob_nn_or",
+                "target_fpr": 0.005,
+                "tob_fpr_budget": 0.002,
+                "trigger_objects": 2,
+                "tob_threshold_gev": float("inf"),
+                "nn_threshold": float("inf"),
+                "achieved_fpr": 0.0,
+            }
+            manifest = {
+                "artifacts": {
+                    "target_fpr": {
+                        "best_validation_record": {
+                            "threshold": float("inf"),
+                            "selected_tob_fpr": 0.002,
+                            "classifier_calibration": validation_calibration,
+                        }
+                    }
+                }
+            }
+            with open(folder / "checkpoint_selection.json", "w") as output:
+                json.dump(manifest, output)
+
+            with patch("evaluate.save_turn_on_plot"):
+                evaluate_experiment(
+                    str(folder),
+                    recalc=True,
+                    num_bins=11,
+                    pt_min=10.0,
+                    pt_max=120.0,
+                    bin_var="truth_pt",
+                    checkpoint_method="target_fpr",
+                )
+
+            with open(folder / "metrics.json") as source:
+                metrics = json.load(source)
+
+            self.assertEqual(metrics["calibration_split"], "test_recalibrated")
+            self.assertEqual(
+                metrics["calibration_source_by_fake_rate"]["0.5%"],
+                "test_recalibrated",
+            )
+            self.assertAlmostEqual(
+                metrics["achieved_fake_rates"]["0.5%"], 0.005
+            )
+            self.assertAlmostEqual(
+                metrics["baseline_tob_pt"]["achieved_fake_rate"], 0.005
+            )
+            self.assertNotEqual(
+                metrics["classifier_calibrations"]["0.5%"]["nn_threshold"],
+                validation_calibration["nn_threshold"],
+            )
+            self.assertEqual(
+                metrics["validation_calibrated_operating_point"][
+                    "test_achieved_fake_rate"
+                ],
+                0.0,
+            )
+
     def test_checkpoint_manifest_exposes_primary_and_secondary_predictions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest = {

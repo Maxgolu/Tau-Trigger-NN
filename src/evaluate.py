@@ -408,34 +408,21 @@ def evaluate_experiment(
     print("Calculating Thresholds and Global Efficiencies...")
     for fr in target_fake_rates:
         active_classifier = classifier_config.with_target_fpr(fr)
-        use_validation_calibration = (
-            classifier_config.tob_budget is not None
-            and classifier_override is None
-            and np.isclose(fr, classifier_config.target_fpr)
-            and validation_record
-            and validation_record.get("classifier_calibration")
+        # Recalibrate every configured classifier on the same test background
+        # used for the TOB baseline, so the primary curves share one FPR policy.
+        calibration = calibrate_classifier(
+            bkg_df,
+            bkg_df["nn_score"].to_numpy(dtype=np.float64),
+            active_classifier,
         )
-        if use_validation_calibration:
-            calibration = validation_record["classifier_calibration"]
-            ratio = float(
-                classifier_event_pass_mask(bkg_df, calibration).mean()
-            )
-        else:
-            calibration = calibrate_classifier(
-                bkg_df,
-                bkg_df["nn_score"].to_numpy(dtype=np.float64),
-                active_classifier,
-            )
-            ratio = calibration["achieved_fpr"]
+        ratio = calibration["achieved_fpr"]
         passed = classifier_object_pass_mask(sig_df, calibration)
         eff = float(passed.mean()) if len(sig_df) else 0.0
         threshold = calibration["nn_threshold"]
 
         fr_str = f"{fr * 100:.1f}%"
         calibrations[fr_str] = calibration
-        calibration_sources[fr_str] = (
-            "validation" if use_validation_calibration else "test"
-        )
+        calibration_sources[fr_str] = "test_recalibrated"
         thresholds[fr_str] = float(threshold)
         achieved_fake_rates[fr_str] = float(ratio)
         global_efficiencies[fr_str] = eff
@@ -448,11 +435,9 @@ def evaluate_experiment(
             f"  Target FPR: {fr_str:>4} | Achieved FPR: {ratio * 100:7.4f}% "
             f"| {threshold_text} | Signal Eff: {eff:.4f}"
         )
-        background_event_count = (
-            int(bkg_df["eventNumber"].nunique())
-            if use_validation_calibration
-            else calibration["diagnostics"]["background_event_count"]
-        )
+        background_event_count = calibration["diagnostics"][
+            "background_event_count"
+        ]
         if fr - ratio > (1.0 / background_event_count) + 1e-12:
             print(
                 "    Note: score ties prevent a closer deterministic operating "
@@ -515,15 +500,7 @@ def evaluate_experiment(
     metrics = {
         "checkpoint_method": checkpoint_method,
         "classifier": classifier_config.to_dict(),
-        "calibration_split": (
-            "test_exploratory"
-            if classifier_override is not None
-            else (
-                "validation_at_target_fpr"
-                if classifier_config.tob_budget is not None
-                else "test"
-            )
-        ),
+        "calibration_split": "test_recalibrated",
         "classifier_calibrations": calibrations,
         "calibration_source_by_fake_rate": calibration_sources,
         "thresholds_by_fake_rate": thresholds,
