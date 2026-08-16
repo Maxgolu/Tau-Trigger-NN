@@ -48,6 +48,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_checkpoint_selection.py # Validation checkpoint-selection regression tests
 │   ├── test_classifiers.py      # Classifier calibration, FPR, and composition tests
 │   ├── test_classifier_selection.py # TOB-budget search and validation-fold tests
+│   ├── test_losses.py           # Energy-weighted loss and normalization tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
@@ -146,6 +147,22 @@ python generate_configs.py --output-dir configs/or_budget_search \
 
 Candidate budgets and objective limits can be changed through the
 `--classifier-tob-budget-*` and `--classifier-objective-*` options.
+
+Energy-weighted BCE can generate several alpha values and a training-fitted
+inverse-frequency profile in the same sweep:
+
+```bash
+python generate_configs.py --output-dir configs/weighted_bce_screen \
+  --feature-set "core_tensors" \
+  --seeds 42 \
+  --loss energy_weighted_bce \
+  --loss-alpha 0 1 2 4 \
+  --loss-include-inverse-frequency
+```
+
+Every alpha is a separate full training run. The inverse-frequency profile uses
+5-GeV signal bins from 25 to 100 GeV by default; its range, bin width, and weight
+limits can be changed through the `--loss-inverse-*` options.
 
 ### Step 2: Train the Network
 Main training script. 
@@ -251,6 +268,8 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * **Hybrid classifier:** `tob_nn_or` accepts each object when either the TOB-pT branch or NN branch passes. Both thresholds are calibrated at event level, including mixed events where each branch contributes one accepted object.
 * **TOB-budget search:** `validation_search` jointly selects the checkpoint and TOB budget. Complete events stay together in deterministic cross-fitting folds. The objective maximizes the mean OR-minus-baseline efficiency from 25 to 100 GeV while protecting every 5-GeV window from 25 to 120 GeV.
 * **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
+* **Energy-weighted BCE:** `energy_weighted_bce` supports fixed alpha profiles and training-fitted inverse-frequency profiles. Only signal examples are redistributed across truth-pT regions; background weights remain one.
+* **Weight normalization:** Signal weights are divided by their mean on the training split, preserving the total signal contribution. Inverse-frequency weights are bounded before normalization to limit gradient variance. The fitted profile is reused unchanged on validation data and saved in `checkpoint_selection.json`.
 
 ### 5. Evaluation & Metrics (`src/evaluate.py`)
 The evaluation script operates on the `predictions.parquet` files generated during testing.  

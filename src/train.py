@@ -17,7 +17,12 @@ from classifier_selection import (
     build_validation_folds,
     search_validation_tob_budget,
 )
-from losses import build_loss, parse_loss
+from losses import (
+    build_loss,
+    calculate_sample_weights,
+    fit_loss_weighting,
+    parse_loss,
+)
 from tracker import ExperimentTracker
 from training_data import TrainingDataCache
 from checkpoint_selection import (
@@ -38,7 +43,8 @@ def predict_scores(model, data_loader, device):
     model.eval()
     scores = []
     with torch.no_grad():
-        for X_batch, _ in data_loader:
+        for batch in data_loader:
+            X_batch = batch[0]
             predictions = model(X_batch.to(device))
             scores.extend(predictions.cpu().numpy().reshape(-1))
     return np.asarray(scores, dtype=np.float64)
@@ -185,6 +191,11 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     y_val_np = dataset.labels[split.validation]
     y_test_np = dataset.labels[split.test]
 
+    df_train_meta = (
+        dataset.frame.iloc[split.train][["truth_pt"]]
+        .copy()
+        .reset_index(drop=True)
+    )
     df_val_meta = (
         dataset.frame.iloc[split.validation].copy().reset_index(drop=True)
     )
@@ -208,9 +219,45 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     X_test = torch.tensor(X_test_np, dtype=torch.float32)
     y_test = torch.tensor(y_test_np, dtype=torch.float32).unsqueeze(1)
 
+    loss_config = parse_loss(config)
+    fitted_loss_weighting = fit_loss_weighting(
+        loss_config,
+        df_train_meta,
+        y_train_np,
+    )
+    uses_sample_weights = fitted_loss_weighting is not None
+
     batch_size = config.get("batch_size", 1024)  # updated to your notebook's default 1024
-    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, shuffle=False)
+    if uses_sample_weights:
+        train_weights = torch.tensor(
+            calculate_sample_weights(
+                fitted_loss_weighting,
+                df_train_meta,
+                y_train_np,
+            ),
+            dtype=torch.float32,
+        ).unsqueeze(1)
+        val_weights = torch.tensor(
+            calculate_sample_weights(
+                fitted_loss_weighting,
+                df_val_meta,
+                y_val_np,
+            ),
+            dtype=torch.float32,
+        ).unsqueeze(1)
+        train_dataset = TensorDataset(X_train, y_train, train_weights)
+        val_dataset = TensorDataset(X_val, y_val, val_weights)
+        print(
+            "Energy weights fitted on training signal: "
+            f"profile={fitted_loss_weighting.profile} | "
+            f"signal mean={train_weights[y_train.reshape(-1) == 1].mean():.4f}"
+        )
+    else:
+        train_dataset = TensorDataset(X_train, y_train)
+        val_dataset = TensorDataset(X_val, y_val)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
 
     model = DynamicMLP(
@@ -218,7 +265,6 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         hidden_layers=config.get("hidden_layers", [32, 16])  # Matches your MLP logic
     ).to(device)
 
-    loss_config = parse_loss(config)
     training_criterion = build_loss(loss_config)
     bce_monitor = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=config.get("learning_rate", 0.001))
@@ -282,12 +328,19 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         running_train_loss = 0.0
         running_train_bce = 0.0
 
-        for X_batch, y_batch in train_loader:
+        for batch in train_loader:
+            X_batch, y_batch = batch[:2]
+            weight_batch = batch[2] if uses_sample_weights else None
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            if weight_batch is not None:
+                weight_batch = weight_batch.to(device)
 
             optimizer.zero_grad()
             outputs = model(X_batch)
-            loss = training_criterion(outputs, y_batch)
+            if weight_batch is None:
+                loss = training_criterion(outputs, y_batch)
+            else:
+                loss = training_criterion(outputs, y_batch, weight_batch)
             loss.backward()
             optimizer.step()
 
@@ -307,10 +360,17 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         validation_scores = []
 
         with torch.no_grad():
-            for X_batch, y_batch in val_loader:
+            for batch in val_loader:
+                X_batch, y_batch = batch[:2]
+                weight_batch = batch[2] if uses_sample_weights else None
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                if weight_batch is not None:
+                    weight_batch = weight_batch.to(device)
                 outputs = model(X_batch)
-                val_loss = training_criterion(outputs, y_batch)
+                if weight_batch is None:
+                    val_loss = training_criterion(outputs, y_batch)
+                else:
+                    val_loss = training_criterion(outputs, y_batch, weight_batch)
                 running_val_loss += val_loss.item() * X_batch.size(0)
                 running_val_bce += (
                     bce_monitor(outputs, y_batch).item() * X_batch.size(0)
@@ -457,7 +517,12 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         "target_fpr": selection.target_fpr,
         "trigger_objects": selection.trigger_objects,
         "classifier": classifier_config.to_dict(),
-        "loss": {"name": loss_config.name},
+        "loss": loss_config.to_dict(),
+        "fitted_loss_weighting": (
+            fitted_loss_weighting.to_dict()
+            if fitted_loss_weighting is not None
+            else None
+        ),
         "energy_bands_gev": [list(band) for band in selection.energy_bands_gev],
         "artifacts": artifacts,
         "epoch_history": checkpoint_history,

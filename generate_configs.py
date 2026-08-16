@@ -129,9 +129,51 @@ def parse_args():
     )
     parser.add_argument(
         "--loss",
-        choices=["bce"],
+        choices=["bce", "energy_weighted_bce"],
         default=None,
         help="Training loss (default: legacy bce).",
+    )
+    parser.add_argument(
+        "--loss-alpha",
+        nargs="+",
+        type=float,
+        default=[0.0],
+        help="Alpha values generated for energy-weighted BCE.",
+    )
+    parser.add_argument(
+        "--loss-include-inverse-frequency",
+        action="store_true",
+        help="Also generate a training-fitted inverse-frequency loss profile.",
+    )
+    parser.add_argument(
+        "--loss-inverse-pt-min",
+        type=float,
+        default=25.0,
+        help="Lowest truth-pT value used by inverse-frequency weighting.",
+    )
+    parser.add_argument(
+        "--loss-inverse-pt-max",
+        type=float,
+        default=100.0,
+        help="Upper truth-pT edge used by inverse-frequency weighting.",
+    )
+    parser.add_argument(
+        "--loss-inverse-bin-width",
+        type=float,
+        default=5.0,
+        help="Truth-pT bin width used by inverse-frequency weighting.",
+    )
+    parser.add_argument(
+        "--loss-inverse-min-weight",
+        type=float,
+        default=0.2,
+        help="Lower raw inverse-frequency weight limit.",
+    )
+    parser.add_argument(
+        "--loss-inverse-max-weight",
+        type=float,
+        default=5.0,
+        help="Upper raw inverse-frequency weight limit.",
     )
     return parser.parse_args()
 
@@ -168,6 +210,7 @@ def generate_sweep_configs(
     checkpoint_selection=None,
     classifier=None,
     loss=None,
+    loss_variants=None,
 ):
     base_config = {"epochs": 20}
     learning_rates = [0.001]
@@ -183,14 +226,32 @@ def generate_sweep_configs(
         ]
     if seeds is None:
         seeds = [42, 123, 456]
+    if loss_variants is None:
+        loss_variants = [loss]
 
     output_dir = Path(output_dir)
     count = 0
-    combinations = product(learning_rates, batch_sizes, architectures, feature_sets)
-    for config_number, (lr, bs, arch, features) in enumerate(combinations, start=1):
+    combinations = product(
+        learning_rates,
+        batch_sizes,
+        architectures,
+        feature_sets,
+        loss_variants,
+    )
+    for config_number, (lr, bs, arch, features, loss_variant) in enumerate(
+        combinations,
+        start=1,
+    ):
         features_str = "_".join(features)
         arch_str = "x".join(map(str, arch))
         experiment_name = f"TauNet_lr{lr}_bs{bs}_arch{arch_str}_{features_str}"
+        if loss_variant is not None and loss_variant.get("name") == "energy_weighted_bce":
+            weighting = loss_variant["weighting"]
+            if weighting["profile"] == "alpha":
+                loss_tag = f"ewbce_a{weighting['alpha']:g}"
+            else:
+                loss_tag = "ewbce_invfreq"
+            experiment_name = f"{experiment_name}_{loss_tag}"
 
         for seed in seeds:
             config = base_config.copy()
@@ -210,8 +271,8 @@ def generate_sweep_configs(
                 config["checkpoint_selection"] = checkpoint_selection
             if classifier is not None:
                 config["classifier"] = classifier
-            if loss is not None:
-                config["loss"] = loss
+            if loss_variant is not None:
+                config["loss"] = loss_variant
             filename = f"c{config_number:03d}_s{seed}.json"
             write_config(config, output_dir, filename)
             count += 1
@@ -275,7 +336,36 @@ if __name__ == "__main__":
                     "TOB-budget search requires --classifier tob_nn_or"
                 )
 
-        loss = {"name": args.loss} if args.loss else None
+        loss_variants = None
+        if args.loss == "bce":
+            loss_variants = [{"name": "bce"}]
+        elif args.loss == "energy_weighted_bce":
+            if any(alpha < 0 for alpha in args.loss_alpha):
+                raise ValueError("--loss-alpha values must be non-negative")
+            loss_variants = [
+                {
+                    "name": "energy_weighted_bce",
+                    "weighting": {
+                        "profile": "alpha",
+                        "alpha": alpha,
+                    },
+                }
+                for alpha in args.loss_alpha
+            ]
+            if args.loss_include_inverse_frequency:
+                loss_variants.append(
+                    {
+                        "name": "energy_weighted_bce",
+                        "weighting": {
+                            "profile": "inverse_frequency",
+                            "pt_min_gev": args.loss_inverse_pt_min,
+                            "pt_max_gev": args.loss_inverse_pt_max,
+                            "bin_width_gev": args.loss_inverse_bin_width,
+                            "min_weight": args.loss_inverse_min_weight,
+                            "max_weight": args.loss_inverse_max_weight,
+                        },
+                    }
+                )
 
         generate_sweep_configs(
             output_dir=args.output_dir,
@@ -283,5 +373,5 @@ if __name__ == "__main__":
             seeds=args.seeds,
             checkpoint_selection=checkpoint_selection,
             classifier=classifier,
-            loss=loss,
+            loss_variants=loss_variants,
         )
