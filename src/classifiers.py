@@ -13,6 +13,7 @@ from operating_point import (
 
 
 VALID_CLASSIFIERS = ("nn_only", "tob_nn_or")
+VALID_NONINFERIORITY_MODES = ("per_window", "pooled_saturation")
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,9 @@ class TobBudgetObjectiveConfig:
     min_truth_pt_gev: float
     objective_max_truth_pt_gev: float
     window_width_gev: float
+    protected_max_truth_pt_gev: float
+    noninferiority_mode: str
+    saturation_start_truth_pt_gev: float
     noninferiority_tolerance: float
     objective_tie_tolerance: float
 
@@ -90,12 +94,27 @@ def parse_classifier(config):
             if folds != 2:
                 raise ValueError("TOB budget search currently requires exactly 2 folds")
             raw_objective = raw_budget.get("objective", {})
+            noninferiority_mode = raw_objective.get(
+                "noninferiority_mode", "pooled_saturation"
+            )
+            if noninferiority_mode not in VALID_NONINFERIORITY_MODES:
+                raise ValueError(
+                    "Unknown classifier noninferiority mode: "
+                    f"{noninferiority_mode}"
+                )
             objective = TobBudgetObjectiveConfig(
                 min_truth_pt_gev=float(raw_objective.get("min_truth_pt_gev", 25.0)),
                 objective_max_truth_pt_gev=float(
                     raw_objective.get("objective_max_truth_pt_gev", 100.0)
                 ),
                 window_width_gev=float(raw_objective.get("window_width_gev", 5.0)),
+                protected_max_truth_pt_gev=float(
+                    raw_objective.get("protected_max_truth_pt_gev", 120.0)
+                ),
+                noninferiority_mode=noninferiority_mode,
+                saturation_start_truth_pt_gev=float(
+                    raw_objective.get("saturation_start_truth_pt_gev", 60.0)
+                ),
                 noninferiority_tolerance=float(
                     raw_objective.get("noninferiority_tolerance", 0.005)
                 ),
@@ -105,6 +124,10 @@ def parse_classifier(config):
             )
             if not (
                 objective.min_truth_pt_gev < objective.objective_max_truth_pt_gev
+                <= objective.protected_max_truth_pt_gev
+                and objective.min_truth_pt_gev
+                < objective.saturation_start_truth_pt_gev
+                <= objective.protected_max_truth_pt_gev
                 and objective.window_width_gev > 0.0
                 and objective.noninferiority_tolerance >= 0.0
                 and objective.objective_tie_tolerance >= 0.0

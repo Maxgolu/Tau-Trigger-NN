@@ -1,0 +1,62 @@
+{
+    "epochs": 20,
+    "run_id": "c003_s123",
+    "experiment_name": "TauNet_lr0.001_bs256_arch32x16_core_physics_core_tensors_ewbce_a0",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        32,
+        16
+    ],
+    "features_to_use": [
+        "core_physics",
+        "core_tensors"
+    ],
+    "seed": 123,
+    "checkpoint_selection": {
+        "methods": [
+            "target_fpr"
+        ],
+        "primary_method": "target_fpr",
+        "target_fpr": 0.005
+    },
+    "classifier": {
+        "name": "tob_nn_or",
+        "target_fpr": 0.005,
+        "trigger_objects": 2,
+        "tob_budget": {
+            "mode": "validation_search",
+            "values": [
+                0.0,
+                0.0005,
+                0.001,
+                0.0015,
+                0.002,
+                0.0025,
+                0.003,
+                0.0035,
+                0.004,
+                0.0045,
+                0.005
+            ],
+            "cross_validation_folds": 2,
+            "objective": {
+                "min_truth_pt_gev": 25.0,
+                "objective_max_truth_pt_gev": 100.0,
+                "window_width_gev": 5.0,
+                "protected_max_truth_pt_gev": 120.0,
+                "noninferiority_mode": "pooled_saturation",
+                "saturation_start_truth_pt_gev": 60.0,
+                "noninferiority_tolerance": 0.005,
+                "objective_tie_tolerance": 0.002
+            }
+        }
+    },
+    "loss": {
+        "name": "energy_weighted_bce",
+        "weighting": {
+            "profile": "alpha",
+            "alpha": 0.0
+        }
+    }
+}

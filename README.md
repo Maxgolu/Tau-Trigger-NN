@@ -50,6 +50,8 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_classifier_selection.py # TOB-budget search and validation-fold tests
 │   ├── test_losses.py           # Energy-weighted loss and normalization tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
+├── slurm/
+│   └── run_config_batch.slurm   # Reusable GPU runner for a generated configuration batch
 ├── generate_configs.py          # Generates JSON config sweeps from feature sets, seeds, and hyperparameters
 ├── requirements.txt             # Python dependencies required by the project
 ├── Report_Plots.ipynb           # Aggregation and plotting notebook for experiment results
@@ -147,6 +149,11 @@ python generate_configs.py --output-dir configs/or_budget_search \
 
 Candidate budgets and objective limits can be changed through the
 `--classifier-tob-budget-*` and `--classifier-objective-*` options.
+By default, noninferiority is checked in 5-GeV windows from 25 to 60 GeV and
+in one pooled 60--120 GeV saturation region. Fine high-pT windows remain in
+the saved diagnostics but cannot reject a candidate through a single sparse
+bin. The protection mode, saturation edge, upper edge, and tolerance are all
+configurable; `per_window` reproduces the earlier fine-window rule.
 
 Energy-weighted BCE can generate several alpha values and a training-fitted
 inverse-frequency profile in the same sweep:
@@ -184,6 +191,16 @@ Caching can be disabled for reproducibility checks:
 
 ```bash
 python src/train.py --configs_dir configs/ --disable_data_cache
+```
+
+A generated batch can be trained, evaluated, and archived on Slurm with the
+reusable runner. Create `logs/` before submitting because Slurm opens its log
+files before the job starts:
+
+```bash
+mkdir -p logs
+sbatch --export=ALL,CONFIG_BATCH=weighted_bce_pooled_s3 \
+  slurm/run_config_batch.slurm
 ```
 
 To train only the CPU smoke test:
@@ -266,7 +283,7 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * **Independent configuration:** The final classifier and training loss use separate config sections, so every classifier can be combined with future losses.
 * **Legacy classifier:** `nn_only` applies the calibrated network-score threshold and remains the default for old configs.
 * **Hybrid classifier:** `tob_nn_or` accepts each object when either the TOB-pT branch or NN branch passes. Both thresholds are calibrated at event level, including mixed events where each branch contributes one accepted object.
-* **TOB-budget search:** `validation_search` jointly selects the checkpoint and TOB budget. Complete events stay together in deterministic cross-fitting folds. The objective maximizes the mean OR-minus-baseline efficiency from 25 to 100 GeV while protecting every 5-GeV window from 25 to 120 GeV.
+* **TOB-budget search:** `validation_search` jointly selects the checkpoint and TOB budget. Complete events stay together in deterministic cross-fitting folds. The objective maximizes the mean OR-minus-baseline efficiency in 5-GeV windows from 25 to 100 GeV. Noninferiority protects fine windows below 60 GeV and one pooled 60--120 GeV saturation region by default, avoiding vetoes from statistically sparse high-pT windows.
 * **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
 * **Energy-weighted BCE:** `energy_weighted_bce` supports fixed alpha profiles and training-fitted inverse-frequency profiles. Only signal examples are redistributed across truth-pT regions; background weights remain one.
 * **Weight normalization:** Signal weights are divided by their mean on the training split, preserving the total signal contribution. Inverse-frequency weights are bounded before normalization to limit gradient variance. The fitted profile is reused unchanged on validation data and saved in `checkpoint_selection.json`.

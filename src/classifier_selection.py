@@ -131,14 +131,26 @@ def _baseline_calibration(background, target_fpr, trigger_objects):
 
 def _window_metrics(signal_parts, objective):
     signal = pd.concat(signal_parts, ignore_index=True)
-    edges = np.arange(
+    regular_edges = np.arange(
         objective.min_truth_pt_gev,
-        120.0 + objective.window_width_gev * 0.5,
+        objective.protected_max_truth_pt_gev,
         objective.window_width_gev,
+    )
+    # Explicit boundaries keep configurable objective and saturation regions exact.
+    edges = np.unique(
+        np.concatenate(
+            [
+                regular_edges,
+                [
+                    objective.objective_max_truth_pt_gev,
+                    objective.saturation_start_truth_pt_gev,
+                    objective.protected_max_truth_pt_gev,
+                ],
+            ]
+        )
     )
     windows = []
     objective_deltas = []
-    protected_deltas = []
     for low, high in zip(edges[:-1], edges[1:]):
         selected = (signal["truth_pt_gev"] >= low) & (signal["truth_pt_gev"] < high)
         count = int(selected.sum())
@@ -146,7 +158,6 @@ def _window_metrics(signal_parts, objective):
             or_eff = float(signal.loc[selected, "or_pass"].mean())
             baseline_eff = float(signal.loc[selected, "baseline_pass"].mean())
             delta = or_eff - baseline_eff
-            protected_deltas.append(delta)
             if low < objective.objective_max_truth_pt_gev:
                 objective_deltas.append(delta)
         else:
@@ -162,12 +173,55 @@ def _window_metrics(signal_parts, objective):
             }
         )
 
-    complete = len(protected_deltas) == len(windows)
+    if objective.noninferiority_mode == "per_window":
+        protection_regions = [dict(window, pooled=False) for window in windows]
+    else:
+        protection_regions = [
+            dict(window, pooled=False)
+            for window in windows
+            if window["high_gev"] <= objective.saturation_start_truth_pt_gev
+        ]
+        pooled = (
+            (signal["truth_pt_gev"] >= objective.saturation_start_truth_pt_gev)
+            & (signal["truth_pt_gev"] < objective.protected_max_truth_pt_gev)
+        )
+        pooled_count = int(pooled.sum())
+        if pooled_count:
+            pooled_or_eff = float(signal.loc[pooled, "or_pass"].mean())
+            pooled_baseline_eff = float(signal.loc[pooled, "baseline_pass"].mean())
+            pooled_delta = pooled_or_eff - pooled_baseline_eff
+        else:
+            pooled_or_eff = pooled_baseline_eff = pooled_delta = None
+        protection_regions.append(
+            {
+                "low_gev": float(objective.saturation_start_truth_pt_gev),
+                "high_gev": float(objective.protected_max_truth_pt_gev),
+                "object_count": pooled_count,
+                "or_efficiency": pooled_or_eff,
+                "baseline_efficiency": pooled_baseline_eff,
+                "delta": pooled_delta,
+                "pooled": True,
+            }
+        )
+
+    objective_window_count = sum(
+        window["low_gev"] < objective.objective_max_truth_pt_gev
+        for window in windows
+    )
+    complete = (
+        len(objective_deltas) == objective_window_count
+        and all(region["delta"] is not None for region in protection_regions)
+    )
+    protected_deltas = [
+        region["delta"]
+        for region in protection_regions
+        if region["delta"] is not None
+    ]
     objective_value = (
         float(np.mean(objective_deltas)) if objective_deltas else -2.0
     )
     min_delta = float(np.min(protected_deltas)) if protected_deltas else -2.0
-    return windows, objective_value, min_delta, complete
+    return windows, protection_regions, objective_value, min_delta, complete
 
 
 def is_better_budget_candidate(candidate, best, tie_tolerance):
@@ -267,9 +321,13 @@ def search_validation_tob_budget(
             )
 
         achieved_fpr = background_passes / background_events
-        windows, objective_value, minimum_delta, complete = _window_metrics(
-            signal_parts, objective
-        )
+        (
+            windows,
+            protection_regions,
+            objective_value,
+            minimum_delta,
+            complete,
+        ) = _window_metrics(signal_parts, objective)
         signal = pd.concat(signal_parts, ignore_index=True)
         noninferiority = (
             complete
@@ -286,6 +344,7 @@ def search_validation_tob_budget(
                 "noninferiority_satisfied": bool(noninferiority),
                 "complete_protected_windows": bool(complete),
                 "windows": windows,
+                "protection_regions": protection_regions,
                 "fold_calibrations": fold_calibrations,
             }
         )
@@ -324,6 +383,11 @@ def search_validation_tob_budget(
                 "min_truth_pt_gev": objective.min_truth_pt_gev,
                 "objective_max_truth_pt_gev": objective.objective_max_truth_pt_gev,
                 "window_width_gev": objective.window_width_gev,
+                "protected_max_truth_pt_gev": objective.protected_max_truth_pt_gev,
+                "noninferiority_mode": objective.noninferiority_mode,
+                "saturation_start_truth_pt_gev": (
+                    objective.saturation_start_truth_pt_gev
+                ),
                 "noninferiority_tolerance": objective.noninferiority_tolerance,
                 "objective_tie_tolerance": objective.objective_tie_tolerance,
             },

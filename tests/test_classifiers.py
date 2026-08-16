@@ -79,7 +79,37 @@ class ClassifierConfigTests(unittest.TestCase):
         self.assertIsNone(fixed.tob_budget)
         self.assertIsNone(searched.tob_fpr)
         self.assertEqual(searched.tob_budget.values, (0.0, 0.002, 0.004))
+        self.assertEqual(
+            searched.tob_budget.objective.noninferiority_mode,
+            "pooled_saturation",
+        )
+        self.assertEqual(
+            searched.tob_budget.objective.saturation_start_truth_pt_gev,
+            60.0,
+        )
+        self.assertEqual(
+            searched.tob_budget.objective.protected_max_truth_pt_gev,
+            120.0,
+        )
         self.assertEqual(searched.with_tob_fpr(0.002).tob_fpr, 0.002)
+
+    def test_invalid_saturation_region_is_rejected(self):
+        with self.assertRaises(ValueError):
+            parse_classifier(
+                {
+                    "classifier": {
+                        "name": "tob_nn_or",
+                        "tob_budget": {
+                            "mode": "validation_search",
+                            "values": [0.0],
+                            "objective": {
+                                "saturation_start_truth_pt_gev": 125.0,
+                                "protected_max_truth_pt_gev": 120.0,
+                            },
+                        },
+                    }
+                }
+            )
 
 
 class OrClassifierTests(unittest.TestCase):

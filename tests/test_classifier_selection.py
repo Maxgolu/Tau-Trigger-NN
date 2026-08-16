@@ -8,6 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from classifier_selection import (
+    _window_metrics,
     build_validation_folds,
     is_better_budget_candidate,
     search_validation_tob_budget,
@@ -45,6 +46,22 @@ def make_validation_frame(background_events=1000):
 
 
 class ValidationFoldTests(unittest.TestCase):
+    @staticmethod
+    def _objective(mode):
+        classifier = parse_classifier(
+            {
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "tob_budget": {
+                        "mode": "validation_search",
+                        "values": [0.0],
+                        "objective": {"noninferiority_mode": mode},
+                    },
+                }
+            }
+        )
+        return classifier.tob_budget.objective
+
     def test_complete_composite_events_remain_in_one_fold(self):
         frame = make_validation_frame()
         folds, audit = build_validation_folds(frame, seed=42)
@@ -88,6 +105,39 @@ class ValidationFoldTests(unittest.TestCase):
         self.assertTrue(
             is_better_budget_candidate(larger_budget, best, 0.002)
         )
+
+    def test_sparse_saturation_fluctuation_is_pooled(self):
+        rows = []
+        for low in np.arange(25.0, 120.0, 5.0):
+            count = 20
+            or_pass = np.ones(count, dtype=bool)
+            baseline_pass = np.ones(count, dtype=bool)
+            if low == 110.0:
+                or_pass[0] = False
+            for index in range(count):
+                rows.append(
+                    {
+                        "truth_pt_gev": low + 2.5,
+                        "or_pass": bool(or_pass[index]),
+                        "baseline_pass": bool(baseline_pass[index]),
+                    }
+                )
+        signal = pd.DataFrame(rows)
+
+        _, pooled_regions, _, pooled_minimum, pooled_complete = _window_metrics(
+            [signal], self._objective("pooled_saturation")
+        )
+        _, fine_regions, _, fine_minimum, fine_complete = _window_metrics(
+            [signal], self._objective("per_window")
+        )
+
+        self.assertTrue(pooled_complete)
+        self.assertTrue(fine_complete)
+        self.assertAlmostEqual(fine_minimum, -1.0 / 20.0)
+        self.assertAlmostEqual(pooled_minimum, -1.0 / (12.0 * 20.0))
+        self.assertEqual(pooled_regions[-1]["low_gev"], 60.0)
+        self.assertEqual(pooled_regions[-1]["high_gev"], 120.0)
+        self.assertTrue(pooled_regions[-1]["pooled"])
 
     def test_cross_fitted_search_returns_audited_candidate(self):
         frame = make_validation_frame()

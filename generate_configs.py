@@ -116,10 +116,31 @@ def parse_args():
         help="Truth-pT comparison-window width in GeV (default: 5).",
     )
     parser.add_argument(
+        "--classifier-protected-max-pt",
+        type=float,
+        default=120.0,
+        help="Upper truth-pT edge protected from regression (default: 120).",
+    )
+    parser.add_argument(
+        "--classifier-noninferiority-mode",
+        choices=["per_window", "pooled_saturation"],
+        default="pooled_saturation",
+        help=(
+            "Protect every fine window or pool the sparse saturation region "
+            "into one comparison (default: pooled_saturation)."
+        ),
+    )
+    parser.add_argument(
+        "--classifier-saturation-start-pt",
+        type=float,
+        default=60.0,
+        help="Lower edge of the pooled saturation region in GeV (default: 60).",
+    )
+    parser.add_argument(
         "--classifier-noninferiority-tolerance",
         type=float,
         default=0.005,
-        help="Allowed efficiency deficit per protected window (default: 0.005).",
+        help="Allowed efficiency deficit per protected region (default: 0.005).",
     )
     parser.add_argument(
         "--classifier-objective-tie-tolerance",
@@ -327,6 +348,9 @@ if __name__ == "__main__":
                             "min_truth_pt_gev": args.classifier_objective_min_pt,
                             "objective_max_truth_pt_gev": args.classifier_objective_max_pt,
                             "window_width_gev": args.classifier_objective_window_width,
+                            "protected_max_truth_pt_gev": args.classifier_protected_max_pt,
+                            "noninferiority_mode": args.classifier_noninferiority_mode,
+                            "saturation_start_truth_pt_gev": args.classifier_saturation_start_pt,
                             "noninferiority_tolerance": args.classifier_noninferiority_tolerance,
                             "objective_tie_tolerance": args.classifier_objective_tie_tolerance,
                         },
