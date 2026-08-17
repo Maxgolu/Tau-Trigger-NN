@@ -129,6 +129,104 @@ def _baseline_calibration(background, target_fpr, trigger_objects):
     return threshold, achieved_fpr
 
 
+def _paired_event_standard_error(region):
+    """Estimate paired OR-minus-baseline uncertainty with event clustering."""
+    differences = (
+        region["or_pass"].to_numpy(dtype=np.float64)
+        - region["baseline_pass"].to_numpy(dtype=np.float64)
+    )
+    if differences.size == 0:
+        return None
+    if "eventNumber" not in region.columns:
+        if differences.size < 2:
+            return None
+        return float(np.std(differences, ddof=1) / np.sqrt(differences.size))
+
+    clustered = pd.DataFrame(
+        {
+            "eventNumber": region["eventNumber"].to_numpy(),
+            "difference": differences,
+        }
+    ).groupby("eventNumber", sort=False)["difference"].agg(["sum", "size"])
+    cluster_count = len(clustered)
+    if cluster_count < 2:
+        return None
+    mean_difference = float(np.mean(differences))
+    residual_sums = (
+        clustered["sum"].to_numpy(dtype=np.float64)
+        - mean_difference * clustered["size"].to_numpy(dtype=np.float64)
+    )
+    variance = (
+        cluster_count
+        / (cluster_count - 1)
+        * np.sum(residual_sums**2)
+        / differences.size**2
+    )
+    return float(np.sqrt(max(variance, 0.0)))
+
+
+def _region_metrics(
+    signal,
+    low,
+    high,
+    objective,
+    region_type,
+    use_uncertainty=False,
+):
+    """Measure one protected region and its configured noninferiority guard."""
+    selected = (signal["truth_pt_gev"] >= low) & (signal["truth_pt_gev"] < high)
+    region = signal.loc[selected]
+    count = int(len(region))
+    if count:
+        or_efficiency = float(region["or_pass"].mean())
+        baseline_efficiency = float(region["baseline_pass"].mean())
+        delta = or_efficiency - baseline_efficiency
+    else:
+        or_efficiency = baseline_efficiency = delta = None
+
+    standard_error = None
+    lower_confidence_bound = None
+    if delta is not None and use_uncertainty:
+        if objective.uncertainty_mode == "paired_standard_error":
+            standard_error = _paired_event_standard_error(region)
+            if standard_error is not None:
+                lower_confidence_bound = (
+                    delta - objective.confidence_z * standard_error
+                )
+        else:
+            standard_error = 0.0
+            lower_confidence_bound = delta
+
+    if use_uncertainty:
+        guard_value = lower_confidence_bound
+        required_minimum = -objective.allowed_physical_deficit
+    else:
+        guard_value = delta
+        required_minimum = -objective.noninferiority_tolerance
+    guard_satisfied = (
+        guard_value is not None and guard_value >= required_minimum
+    )
+    guard_margin = (
+        guard_value - required_minimum if guard_value is not None else None
+    )
+    return {
+        "low_gev": float(low),
+        "high_gev": float(high),
+        "object_count": count,
+        "or_efficiency": or_efficiency,
+        "baseline_efficiency": baseline_efficiency,
+        "delta": delta,
+        "region_type": region_type,
+        "uses_uncertainty": bool(use_uncertainty),
+        "standard_error": standard_error,
+        "lower_confidence_bound": lower_confidence_bound,
+        "guard_value": guard_value,
+        "required_minimum": float(required_minimum),
+        "guard_margin": guard_margin,
+        "guard_satisfied": bool(guard_satisfied),
+    }
+
+
 def _window_metrics(signal_parts, objective):
     signal = pd.concat(signal_parts, ignore_index=True)
     regular_edges = np.arange(
@@ -152,57 +250,77 @@ def _window_metrics(signal_parts, objective):
     windows = []
     objective_deltas = []
     for low, high in zip(edges[:-1], edges[1:]):
-        selected = (signal["truth_pt_gev"] >= low) & (signal["truth_pt_gev"] < high)
-        count = int(selected.sum())
-        if count:
-            or_eff = float(signal.loc[selected, "or_pass"].mean())
-            baseline_eff = float(signal.loc[selected, "baseline_pass"].mean())
-            delta = or_eff - baseline_eff
-            if low < objective.objective_max_truth_pt_gev:
-                objective_deltas.append(delta)
-        else:
-            or_eff = baseline_eff = delta = None
-        windows.append(
-            {
-                "low_gev": float(low),
-                "high_gev": float(high),
-                "object_count": count,
-                "or_efficiency": or_eff,
-                "baseline_efficiency": baseline_eff,
-                "delta": delta,
-            }
+        window = _region_metrics(
+            signal,
+            low,
+            high,
+            objective,
+            region_type="fine_window",
+            use_uncertainty=False,
         )
+        if (
+            window["delta"] is not None
+            and low < objective.objective_max_truth_pt_gev
+        ):
+            objective_deltas.append(window["delta"])
+        windows.append(window)
 
     if objective.noninferiority_mode == "per_window":
         protection_regions = [dict(window, pooled=False) for window in windows]
+    elif objective.noninferiority_mode == "pooled_saturation":
+        protection_regions = [
+            dict(window, pooled=False)
+            for window in windows
+            if window["high_gev"] <= objective.saturation_start_truth_pt_gev
+        ]
+        pooled_region = _region_metrics(
+            signal,
+            objective.saturation_start_truth_pt_gev,
+            objective.protected_max_truth_pt_gev,
+            objective,
+            region_type="full_saturation_pool",
+            use_uncertainty=False,
+        )
+        protection_regions.append(dict(pooled_region, pooled=True))
     else:
         protection_regions = [
             dict(window, pooled=False)
             for window in windows
             if window["high_gev"] <= objective.saturation_start_truth_pt_gev
         ]
-        pooled = (
-            (signal["truth_pt_gev"] >= objective.saturation_start_truth_pt_gev)
-            & (signal["truth_pt_gev"] < objective.protected_max_truth_pt_gev)
+        last_start = (
+            objective.protected_max_truth_pt_gev
+            - objective.saturation_window_width_gev
         )
-        pooled_count = int(pooled.sum())
-        if pooled_count:
-            pooled_or_eff = float(signal.loc[pooled, "or_pass"].mean())
-            pooled_baseline_eff = float(signal.loc[pooled, "baseline_pass"].mean())
-            pooled_delta = pooled_or_eff - pooled_baseline_eff
-        else:
-            pooled_or_eff = pooled_baseline_eff = pooled_delta = None
-        protection_regions.append(
-            {
-                "low_gev": float(objective.saturation_start_truth_pt_gev),
-                "high_gev": float(objective.protected_max_truth_pt_gev),
-                "object_count": pooled_count,
-                "or_efficiency": pooled_or_eff,
-                "baseline_efficiency": pooled_baseline_eff,
-                "delta": pooled_delta,
-                "pooled": True,
-            }
+        starts = list(
+            np.arange(
+                objective.saturation_start_truth_pt_gev,
+                last_start + objective.saturation_window_stride_gev * 0.5,
+                objective.saturation_window_stride_gev,
+            )
         )
+        if not starts or not np.isclose(starts[-1], last_start):
+            starts.append(last_start)
+        for low in sorted(set(float(value) for value in starts)):
+            rolling = _region_metrics(
+                signal,
+                low,
+                low + objective.saturation_window_width_gev,
+                objective,
+                region_type="rolling_saturation",
+                use_uncertainty=True,
+            )
+            protection_regions.append(dict(rolling, pooled=True))
+        if objective.include_full_saturation_pool:
+            full_pool = _region_metrics(
+                signal,
+                objective.saturation_start_truth_pt_gev,
+                objective.protected_max_truth_pt_gev,
+                objective,
+                region_type="full_saturation_pool",
+                use_uncertainty=True,
+            )
+            protection_regions.append(dict(full_pool, pooled=True))
 
     objective_window_count = sum(
         window["low_gev"] < objective.objective_max_truth_pt_gev
@@ -210,7 +328,7 @@ def _window_metrics(signal_parts, objective):
     )
     complete = (
         len(objective_deltas) == objective_window_count
-        and all(region["delta"] is not None for region in protection_regions)
+        and all(region["guard_value"] is not None for region in protection_regions)
     )
     protected_deltas = [
         region["delta"]
@@ -221,7 +339,22 @@ def _window_metrics(signal_parts, objective):
         float(np.mean(objective_deltas)) if objective_deltas else -2.0
     )
     min_delta = float(np.min(protected_deltas)) if protected_deltas else -2.0
-    return windows, protection_regions, objective_value, min_delta, complete
+    guard_margins = [
+        region["guard_margin"]
+        for region in protection_regions
+        if region["guard_margin"] is not None
+    ]
+    minimum_guard_margin = (
+        float(np.min(guard_margins)) if guard_margins else -2.0
+    )
+    return (
+        windows,
+        protection_regions,
+        objective_value,
+        min_delta,
+        minimum_guard_margin,
+        complete,
+    )
 
 
 def is_better_budget_candidate(candidate, best, tie_tolerance):
@@ -234,11 +367,19 @@ def is_better_budget_candidate(candidate, best, tie_tolerance):
         difference = candidate["objective_value"] - best["objective_value"]
         if abs(difference) > tie_tolerance:
             return difference > 0.0
-        if not np.isclose(candidate["minimum_delta"], best["minimum_delta"]):
-            return candidate["minimum_delta"] > best["minimum_delta"]
+        candidate_guard = candidate.get(
+            "minimum_guard_margin", candidate["minimum_delta"]
+        )
+        best_guard = best.get("minimum_guard_margin", best["minimum_delta"])
+        if not np.isclose(candidate_guard, best_guard):
+            return candidate_guard > best_guard
     else:
-        if not np.isclose(candidate["minimum_delta"], best["minimum_delta"]):
-            return candidate["minimum_delta"] > best["minimum_delta"]
+        candidate_guard = candidate.get(
+            "minimum_guard_margin", candidate["minimum_delta"]
+        )
+        best_guard = best.get("minimum_guard_margin", best["minimum_delta"])
+        if not np.isclose(candidate_guard, best_guard):
+            return candidate_guard > best_guard
         if not np.isclose(candidate["objective_value"], best["objective_value"]):
             return candidate["objective_value"] > best["objective_value"]
     return candidate["tob_fpr"] > best["tob_fpr"]
@@ -306,7 +447,7 @@ def search_validation_tob_budget(
             )
             signal_parts.append(
                 selected_signal[
-                    ["truth_pt_gev", "or_pass", "baseline_pass"]
+                    ["eventNumber", "truth_pt_gev", "or_pass", "baseline_pass"]
                 ]
             )
             fold_calibrations.append(
@@ -326,13 +467,14 @@ def search_validation_tob_budget(
             protection_regions,
             objective_value,
             minimum_delta,
+            minimum_guard_margin,
             complete,
         ) = _window_metrics(signal_parts, objective)
         signal = pd.concat(signal_parts, ignore_index=True)
         noninferiority = (
             complete
             and achieved_fpr <= classifier_config.target_fpr + 1e-12
-            and minimum_delta >= -objective.noninferiority_tolerance
+            and all(region["guard_satisfied"] for region in protection_regions)
         )
         candidates.append(
             {
@@ -341,6 +483,7 @@ def search_validation_tob_budget(
                 "signal_efficiency": float(signal["or_pass"].mean()),
                 "objective_value": float(objective_value),
                 "minimum_delta": float(minimum_delta),
+                "minimum_guard_margin": float(minimum_guard_margin),
                 "noninferiority_satisfied": bool(noninferiority),
                 "complete_protected_windows": bool(complete),
                 "windows": windows,
@@ -372,12 +515,14 @@ def search_validation_tob_budget(
         "selected_tob_fpr": best["tob_fpr"],
         "objective_value": best["objective_value"],
         "minimum_delta": best["minimum_delta"],
+        "minimum_guard_margin": best["minimum_guard_margin"],
         "noninferiority_satisfied": best["noninferiority_satisfied"],
         "tob_budget_search": {
             "mode": "validation_search",
             "selected_tob_fpr": best["tob_fpr"],
             "objective_value": best["objective_value"],
             "minimum_delta": best["minimum_delta"],
+            "minimum_guard_margin": best["minimum_guard_margin"],
             "noninferiority_satisfied": best["noninferiority_satisfied"],
             "objective": {
                 "min_truth_pt_gev": objective.min_truth_pt_gev,
@@ -389,6 +534,20 @@ def search_validation_tob_budget(
                     objective.saturation_start_truth_pt_gev
                 ),
                 "noninferiority_tolerance": objective.noninferiority_tolerance,
+                "saturation_window_width_gev": (
+                    objective.saturation_window_width_gev
+                ),
+                "saturation_window_stride_gev": (
+                    objective.saturation_window_stride_gev
+                ),
+                "include_full_saturation_pool": (
+                    objective.include_full_saturation_pool
+                ),
+                "uncertainty_mode": objective.uncertainty_mode,
+                "confidence_z": objective.confidence_z,
+                "allowed_physical_deficit": (
+                    objective.allowed_physical_deficit
+                ),
                 "objective_tie_tolerance": objective.objective_tie_tolerance,
             },
             "fold_audit": fold_audit,

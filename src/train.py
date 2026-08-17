@@ -472,6 +472,7 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
                     "signal_efficiency",
                     "objective_value",
                     "minimum_delta",
+                    "minimum_guard_margin",
                     "noninferiority_satisfied",
                     "tob_budget_search",
                 )

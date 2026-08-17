@@ -8,6 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from classifier_selection import (
+    _paired_event_standard_error,
     _window_metrics,
     build_validation_folds,
     is_better_budget_candidate,
@@ -106,6 +107,53 @@ class ValidationFoldTests(unittest.TestCase):
             is_better_budget_candidate(larger_budget, best, 0.002)
         )
 
+    def test_budget_order_uses_uncertainty_guard_margin_when_available(self):
+        best = {
+            "noninferiority_satisfied": False,
+            "objective_value": 0.02,
+            "minimum_delta": 0.01,
+            "minimum_guard_margin": -0.03,
+            "tob_fpr": 0.002,
+        }
+        candidate = {
+            "noninferiority_satisfied": False,
+            "objective_value": 0.01,
+            "minimum_delta": 0.00,
+            "minimum_guard_margin": -0.01,
+            "tob_fpr": 0.001,
+        }
+
+        self.assertTrue(is_better_budget_candidate(candidate, best, 0.002))
+
+    def test_paired_uncertainty_is_clustered_by_event(self):
+        region = pd.DataFrame(
+            {
+                "eventNumber": np.repeat([1, 2, 3, 4], 2),
+                "or_pass": [True, True, False, False, True, True, True, True],
+                "baseline_pass": [
+                    False,
+                    False,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                ],
+            }
+        )
+        object_differences = (
+            region["or_pass"].to_numpy(dtype=float)
+            - region["baseline_pass"].to_numpy(dtype=float)
+        )
+        independent_object_error = np.std(object_differences, ddof=1) / np.sqrt(
+            len(object_differences)
+        )
+
+        clustered_error = _paired_event_standard_error(region)
+
+        self.assertGreater(clustered_error, independent_object_error)
+
     def test_sparse_saturation_fluctuation_is_pooled(self):
         rows = []
         for low in np.arange(25.0, 120.0, 5.0):
@@ -124,10 +172,17 @@ class ValidationFoldTests(unittest.TestCase):
                 )
         signal = pd.DataFrame(rows)
 
-        _, pooled_regions, _, pooled_minimum, pooled_complete = _window_metrics(
+        (
+            _,
+            pooled_regions,
+            _,
+            pooled_minimum,
+            _,
+            pooled_complete,
+        ) = _window_metrics(
             [signal], self._objective("pooled_saturation")
         )
-        _, fine_regions, _, fine_minimum, fine_complete = _window_metrics(
+        _, fine_regions, _, fine_minimum, _, fine_complete = _window_metrics(
             [signal], self._objective("per_window")
         )
 
@@ -138,6 +193,71 @@ class ValidationFoldTests(unittest.TestCase):
         self.assertEqual(pooled_regions[-1]["low_gev"], 60.0)
         self.assertEqual(pooled_regions[-1]["high_gev"], 120.0)
         self.assertTrue(pooled_regions[-1]["pooled"])
+
+    def test_multiscale_saturation_uses_uncertainty_aware_overlapping_guards(self):
+        rows = []
+        event_number = 0
+        for low in np.arange(25.0, 120.0, 5.0):
+            for index in range(20):
+                or_pass = True
+                baseline_pass = True
+                if low == 60.0 and index < 5:
+                    or_pass = False
+                elif low == 60.0 and index < 10:
+                    baseline_pass = False
+                rows.append(
+                    {
+                        "eventNumber": event_number,
+                        "truth_pt_gev": low + 2.5,
+                        "or_pass": or_pass,
+                        "baseline_pass": baseline_pass,
+                    }
+                )
+                event_number += 1
+        signal = pd.DataFrame(rows)
+        objective = parse_classifier(
+            {
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "tob_budget": {
+                        "mode": "validation_search",
+                        "values": [0.0],
+                        "objective": {
+                            "noninferiority_mode": "multiscale_saturation",
+                            "confidence_z": 1.0,
+                            "allowed_physical_deficit": 0.0,
+                        },
+                    },
+                }
+            }
+        ).tob_budget.objective
+
+        _, regions, _, minimum_delta, guard_margin, complete = _window_metrics(
+            [signal], objective
+        )
+        rolling = [
+            region
+            for region in regions
+            if region["region_type"] == "rolling_saturation"
+        ]
+        full_pool = [
+            region
+            for region in regions
+            if region["region_type"] == "full_saturation_pool"
+        ]
+
+        self.assertTrue(complete)
+        self.assertEqual(
+            [(region["low_gev"], region["high_gev"]) for region in rolling],
+            [(60.0, 90.0), (70.0, 100.0), (80.0, 110.0), (90.0, 120.0)],
+        )
+        self.assertEqual(len(full_pool), 1)
+        self.assertAlmostEqual(rolling[0]["delta"], 0.0)
+        self.assertGreater(rolling[0]["standard_error"], 0.0)
+        self.assertLess(rolling[0]["lower_confidence_bound"], 0.0)
+        self.assertFalse(rolling[0]["guard_satisfied"])
+        self.assertAlmostEqual(minimum_delta, 0.0)
+        self.assertLess(guard_margin, 0.0)
 
     def test_cross_fitted_search_returns_audited_candidate(self):
         frame = make_validation_frame()

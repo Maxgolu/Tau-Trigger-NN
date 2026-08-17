@@ -13,7 +13,12 @@ from operating_point import (
 
 
 VALID_CLASSIFIERS = ("nn_only", "tob_nn_or")
-VALID_NONINFERIORITY_MODES = ("per_window", "pooled_saturation")
+VALID_NONINFERIORITY_MODES = (
+    "per_window",
+    "pooled_saturation",
+    "multiscale_saturation",
+)
+VALID_UNCERTAINTY_MODES = ("none", "paired_standard_error")
 
 
 @dataclass(frozen=True)
@@ -25,6 +30,12 @@ class TobBudgetObjectiveConfig:
     noninferiority_mode: str
     saturation_start_truth_pt_gev: float
     noninferiority_tolerance: float
+    saturation_window_width_gev: float
+    saturation_window_stride_gev: float
+    include_full_saturation_pool: bool
+    uncertainty_mode: str
+    confidence_z: float
+    allowed_physical_deficit: float
     objective_tie_tolerance: float
 
 
@@ -102,6 +113,14 @@ def parse_classifier(config):
                     "Unknown classifier noninferiority mode: "
                     f"{noninferiority_mode}"
                 )
+            uncertainty_mode = raw_objective.get(
+                "uncertainty_mode", "paired_standard_error"
+            )
+            if uncertainty_mode not in VALID_UNCERTAINTY_MODES:
+                raise ValueError(
+                    "Unknown classifier uncertainty mode: "
+                    f"{uncertainty_mode}"
+                )
             objective = TobBudgetObjectiveConfig(
                 min_truth_pt_gev=float(raw_objective.get("min_truth_pt_gev", 25.0)),
                 objective_max_truth_pt_gev=float(
@@ -118,6 +137,20 @@ def parse_classifier(config):
                 noninferiority_tolerance=float(
                     raw_objective.get("noninferiority_tolerance", 0.005)
                 ),
+                saturation_window_width_gev=float(
+                    raw_objective.get("saturation_window_width_gev", 30.0)
+                ),
+                saturation_window_stride_gev=float(
+                    raw_objective.get("saturation_window_stride_gev", 10.0)
+                ),
+                include_full_saturation_pool=bool(
+                    raw_objective.get("include_full_saturation_pool", True)
+                ),
+                uncertainty_mode=uncertainty_mode,
+                confidence_z=float(raw_objective.get("confidence_z", 1.0)),
+                allowed_physical_deficit=float(
+                    raw_objective.get("allowed_physical_deficit", 0.0)
+                ),
                 objective_tie_tolerance=float(
                     raw_objective.get("objective_tie_tolerance", 0.002)
                 ),
@@ -130,6 +163,15 @@ def parse_classifier(config):
                 <= objective.protected_max_truth_pt_gev
                 and objective.window_width_gev > 0.0
                 and objective.noninferiority_tolerance >= 0.0
+                and objective.saturation_window_width_gev > 0.0
+                and objective.saturation_window_stride_gev > 0.0
+                and objective.saturation_window_stride_gev
+                <= objective.saturation_window_width_gev
+                and objective.saturation_window_width_gev
+                <= objective.protected_max_truth_pt_gev
+                - objective.saturation_start_truth_pt_gev
+                and objective.confidence_z >= 0.0
+                and objective.allowed_physical_deficit >= 0.0
                 and objective.objective_tie_tolerance >= 0.0
             ):
                 raise ValueError("Invalid classifier.tob_budget.objective settings")

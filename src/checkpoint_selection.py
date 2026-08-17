@@ -158,25 +158,37 @@ def is_better_checkpoint(method, candidate, best):
             if candidate_feasible and abs(objective_difference) > tie_tolerance:
                 return objective_difference > 0.0
             if candidate_feasible:
+                candidate_guard = candidate.get(
+                    "minimum_guard_margin", candidate["minimum_delta"]
+                )
+                best_guard = best.get(
+                    "minimum_guard_margin", best["minimum_delta"]
+                )
                 candidate_key = (
-                    candidate["minimum_delta"],
+                    candidate_guard,
                     candidate["selected_tob_fpr"],
                     -candidate["validation_bce"],
                 )
                 best_key = (
-                    best["minimum_delta"],
+                    best_guard,
                     best["selected_tob_fpr"],
                     -best["validation_bce"],
                 )
             else:
+                candidate_guard = candidate.get(
+                    "minimum_guard_margin", candidate["minimum_delta"]
+                )
+                best_guard = best.get(
+                    "minimum_guard_margin", best["minimum_delta"]
+                )
                 candidate_key = (
-                    candidate["minimum_delta"],
+                    candidate_guard,
                     candidate["objective_value"],
                     candidate["selected_tob_fpr"],
                     -candidate["validation_bce"],
                 )
                 best_key = (
-                    best["minimum_delta"],
+                    best_guard,
                     best["objective_value"],
                     best["selected_tob_fpr"],
                     -best["validation_bce"],

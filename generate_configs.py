@@ -123,11 +123,15 @@ def parse_args():
     )
     parser.add_argument(
         "--classifier-noninferiority-mode",
-        choices=["per_window", "pooled_saturation"],
+        choices=[
+            "per_window",
+            "pooled_saturation",
+            "multiscale_saturation",
+        ],
         default="pooled_saturation",
         help=(
-            "Protect every fine window or pool the sparse saturation region "
-            "into one comparison (default: pooled_saturation)."
+            "Use fine windows, one saturation pool, or overlapping statistical "
+            "saturation guards (default: pooled_saturation)."
         ),
     )
     parser.add_argument(
@@ -141,6 +145,43 @@ def parse_args():
         type=float,
         default=0.005,
         help="Allowed efficiency deficit per protected region (default: 0.005).",
+    )
+    parser.add_argument(
+        "--classifier-saturation-window-width",
+        type=float,
+        default=30.0,
+        help="Width of each statistical saturation window in GeV (default: 30).",
+    )
+    parser.add_argument(
+        "--classifier-saturation-window-stride",
+        type=float,
+        default=10.0,
+        help="Stride between statistical saturation windows in GeV (default: 10).",
+    )
+    parser.add_argument(
+        "--classifier-no-full-saturation-pool",
+        action="store_false",
+        dest="classifier_include_full_saturation_pool",
+        help="Disable the additional full saturation-region guard.",
+    )
+    parser.set_defaults(classifier_include_full_saturation_pool=True)
+    parser.add_argument(
+        "--classifier-uncertainty-mode",
+        choices=["none", "paired_standard_error"],
+        default="paired_standard_error",
+        help="Uncertainty used by multiscale saturation guards.",
+    )
+    parser.add_argument(
+        "--classifier-confidence-z",
+        type=float,
+        default=1.0,
+        help="One-sided standard-error multiplier for saturation guards.",
+    )
+    parser.add_argument(
+        "--classifier-allowed-physical-deficit",
+        type=float,
+        default=0.0,
+        help="Allowed deficit after uncertainty protection (default: 0).",
     )
     parser.add_argument(
         "--classifier-objective-tie-tolerance",
@@ -352,6 +393,12 @@ if __name__ == "__main__":
                             "noninferiority_mode": args.classifier_noninferiority_mode,
                             "saturation_start_truth_pt_gev": args.classifier_saturation_start_pt,
                             "noninferiority_tolerance": args.classifier_noninferiority_tolerance,
+                            "saturation_window_width_gev": args.classifier_saturation_window_width,
+                            "saturation_window_stride_gev": args.classifier_saturation_window_stride,
+                            "include_full_saturation_pool": args.classifier_include_full_saturation_pool,
+                            "uncertainty_mode": args.classifier_uncertainty_mode,
+                            "confidence_z": args.classifier_confidence_z,
+                            "allowed_physical_deficit": args.classifier_allowed_physical_deficit,
                             "objective_tie_tolerance": args.classifier_objective_tie_tolerance,
                         },
                     }

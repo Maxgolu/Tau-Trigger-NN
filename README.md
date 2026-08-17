@@ -155,6 +155,26 @@ the saved diagnostics but cannot reject a candidate through a single sparse
 bin. The protection mode, saturation edge, upper edge, and tolerance are all
 configurable; `per_window` reproduces the earlier fine-window rule.
 
+`multiscale_saturation` keeps the fine protection below 60 GeV and checks the
+saturation range with overlapping 30-GeV windows plus the full 60--120 GeV
+pool. Its lower guard is `delta - z * standard_error`, where the paired error
+is clustered by event. Window width, stride, `z`, and the allowed physical
+deficit are configurable:
+
+```bash
+python generate_configs.py --output-dir configs/or_multiscale \
+  --feature-set "core_tensors" \
+  --seeds 42 123 456 \
+  --classifier tob_nn_or \
+  --classifier-tob-budget-mode validation_search \
+  --classifier-noninferiority-mode multiscale_saturation \
+  --classifier-saturation-window-width 30 \
+  --classifier-saturation-window-stride 10 \
+  --classifier-confidence-z 1.0 \
+  --classifier-allowed-physical-deficit 0.0 \
+  --checkpoint-method target_fpr
+```
+
 Energy-weighted BCE can generate several alpha values and a training-fitted
 inverse-frequency profile in the same sweep:
 

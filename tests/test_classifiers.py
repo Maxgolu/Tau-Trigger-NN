@@ -91,7 +91,50 @@ class ClassifierConfigTests(unittest.TestCase):
             searched.tob_budget.objective.protected_max_truth_pt_gev,
             120.0,
         )
+        self.assertEqual(
+            searched.tob_budget.objective.saturation_window_width_gev,
+            30.0,
+        )
+        self.assertEqual(
+            searched.tob_budget.objective.saturation_window_stride_gev,
+            10.0,
+        )
+        self.assertEqual(
+            searched.tob_budget.objective.uncertainty_mode,
+            "paired_standard_error",
+        )
         self.assertEqual(searched.with_tob_fpr(0.002).tob_fpr, 0.002)
+
+    def test_multiscale_saturation_settings_are_configurable(self):
+        searched = parse_classifier(
+            {
+                "classifier": {
+                    "name": "tob_nn_or",
+                    "tob_budget": {
+                        "mode": "validation_search",
+                        "values": [0.0],
+                        "objective": {
+                            "noninferiority_mode": "multiscale_saturation",
+                            "saturation_window_width_gev": 20.0,
+                            "saturation_window_stride_gev": 5.0,
+                            "include_full_saturation_pool": False,
+                            "uncertainty_mode": "none",
+                            "confidence_z": 1.5,
+                            "allowed_physical_deficit": 0.002,
+                        },
+                    },
+                }
+            }
+        )
+        objective = searched.tob_budget.objective
+
+        self.assertEqual(objective.noninferiority_mode, "multiscale_saturation")
+        self.assertEqual(objective.saturation_window_width_gev, 20.0)
+        self.assertEqual(objective.saturation_window_stride_gev, 5.0)
+        self.assertFalse(objective.include_full_saturation_pool)
+        self.assertEqual(objective.uncertainty_mode, "none")
+        self.assertEqual(objective.confidence_z, 1.5)
+        self.assertEqual(objective.allowed_physical_deficit, 0.002)
 
     def test_invalid_saturation_region_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -105,6 +148,24 @@ class ClassifierConfigTests(unittest.TestCase):
                             "objective": {
                                 "saturation_start_truth_pt_gev": 125.0,
                                 "protected_max_truth_pt_gev": 120.0,
+                            },
+                        },
+                    }
+                }
+            )
+
+    def test_invalid_multiscale_stride_is_rejected(self):
+        with self.assertRaises(ValueError):
+            parse_classifier(
+                {
+                    "classifier": {
+                        "name": "tob_nn_or",
+                        "tob_budget": {
+                            "mode": "validation_search",
+                            "values": [0.0],
+                            "objective": {
+                                "saturation_window_width_gev": 20.0,
+                                "saturation_window_stride_gev": 25.0,
                             },
                         },
                     }
