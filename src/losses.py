@@ -9,13 +9,14 @@ import torch.nn.functional as F
 
 
 VALID_LOSSES = ("bce", "energy_weighted_bce")
-VALID_WEIGHT_PROFILES = ("alpha", "inverse_frequency")
+VALID_WEIGHT_PROFILES = ("alpha", "inverse_frequency", "power_law")
 
 
 @dataclass(frozen=True)
 class EnergyWeightingConfig:
     profile: str = "alpha"
     alpha: float = 0.0
+    power: float = 0.0
     pt_min_gev: float = 25.0
     pt_max_gev: float = 100.0
     bin_width_gev: float = 5.0
@@ -30,6 +31,14 @@ class EnergyWeightingConfig:
         if self.profile == "alpha":
             result["alpha"] = self.alpha
             result["bands_gev"] = [25.0, 40.0, 80.0]
+        elif self.profile == "power_law":
+            result.update(
+                {
+                    "p": self.power,
+                    "pt_clip_min_gev": self.pt_min_gev,
+                    "pt_clip_max_gev": self.pt_max_gev,
+                }
+            )
         else:
             result.update(
                 {
@@ -66,12 +75,15 @@ class FittedEnergyWeighting:
     signal_counts: tuple
     normalization_factor: float
     training_signal_count: int
+    power: float | None = None
+    pt_clip_min_gev: float | None = None
+    pt_clip_max_gev: float | None = None
 
     def to_dict(self):
         def finite_or_none(value):
             return float(value) if np.isfinite(value) else None
 
-        return {
+        result = {
             "profile": self.profile,
             "normalization": "training_signal_mean",
             "edges_gev": [finite_or_none(value) for value in self.edges_gev],
@@ -81,6 +93,15 @@ class FittedEnergyWeighting:
             "normalization_factor": float(self.normalization_factor),
             "training_signal_count": int(self.training_signal_count),
         }
+        if self.profile == "power_law":
+            result.update(
+                {
+                    "p": float(self.power),
+                    "pt_clip_min_gev": float(self.pt_clip_min_gev),
+                    "pt_clip_max_gev": float(self.pt_clip_max_gev),
+                }
+            )
+        return result
 
 
 class EnergyWeightedBCELoss(nn.Module):
@@ -110,15 +131,32 @@ def parse_loss(config):
         raise ValueError(f"Unknown energy-weight profile: {profile}")
 
     alpha = float(weighting_raw.get("alpha", 0.0))
-    pt_min = float(weighting_raw.get("pt_min_gev", 25.0))
-    pt_max = float(weighting_raw.get("pt_max_gev", 100.0))
+    power = float(weighting_raw.get("p", 0.0))
+    default_pt_min = 10.0 if profile == "power_law" else 25.0
+    default_pt_max = 200.0 if profile == "power_law" else 100.0
+    pt_min = float(
+        weighting_raw.get(
+            "pt_clip_min_gev",
+            weighting_raw.get("pt_min_gev", default_pt_min),
+        )
+    )
+    pt_max = float(
+        weighting_raw.get(
+            "pt_clip_max_gev",
+            weighting_raw.get("pt_max_gev", default_pt_max),
+        )
+    )
     bin_width = float(weighting_raw.get("bin_width_gev", 5.0))
     min_weight = float(weighting_raw.get("min_weight", 0.2))
     max_weight = float(weighting_raw.get("max_weight", 5.0))
 
     if alpha < 0:
         raise ValueError("loss.weighting.alpha must be non-negative")
-    if not 0 <= pt_min < pt_max:
+    if not np.isfinite(power):
+        raise ValueError("loss.weighting.p must be finite")
+    if profile == "power_law" and not 0 < pt_min < pt_max:
+        raise ValueError("power-law pT limits must satisfy 0 < min < max")
+    if profile != "power_law" and not 0 <= pt_min < pt_max:
         raise ValueError("inverse-frequency pT limits must satisfy 0 <= min < max")
     if bin_width <= 0:
         raise ValueError("loss.weighting.bin_width_gev must be positive")
@@ -128,6 +166,7 @@ def parse_loss(config):
     weighting = EnergyWeightingConfig(
         profile=profile,
         alpha=alpha,
+        power=power,
         pt_min_gev=pt_min,
         pt_max_gev=pt_max,
         bin_width_gev=bin_width,
@@ -199,6 +238,16 @@ def _inverse_frequency_regions(weighting, truth_pt_gev, signal_mask):
     return edges, raw
 
 
+def _power_law_raw(weighting, truth_pt_gev):
+    """Return continuous t^-p weights after a finite pT clamp."""
+    clipped = np.clip(
+        truth_pt_gev,
+        weighting.pt_min_gev,
+        weighting.pt_max_gev,
+    )
+    return np.power(clipped, -weighting.power, dtype=np.float64)
+
+
 def fit_loss_weighting(loss_config, training_metadata, training_labels):
     """Fit energy weights on training data; return None for ordinary BCE."""
     if loss_config.name == "bce":
@@ -210,11 +259,31 @@ def fit_loss_weighting(loss_config, training_metadata, training_labels):
     weighting = loss_config.weighting
     if weighting.profile == "alpha":
         edges, raw = _alpha_regions(weighting.alpha)
-    else:
+    elif weighting.profile == "inverse_frequency":
         edges, raw = _inverse_frequency_regions(
             weighting,
             truth_pt_gev,
             signal_mask,
+        )
+    else:
+        signal_pt = truth_pt_gev[signal_mask]
+        if np.any(~np.isfinite(signal_pt)) or np.any(signal_pt <= 0):
+            raise ValueError("power-law weighting requires finite positive signal truth_pt")
+        signal_raw_weights = _power_law_raw(weighting, signal_pt)
+        normalization = float(signal_raw_weights.mean())
+        if not np.isfinite(normalization) or normalization <= 0:
+            raise ValueError("Could not normalize power-law energy weights")
+        return FittedEnergyWeighting(
+            profile=weighting.profile,
+            edges_gev=tuple(),
+            raw_multipliers=tuple(),
+            multipliers=tuple(),
+            signal_counts=(int(signal_mask.sum()),),
+            normalization_factor=normalization,
+            training_signal_count=int(signal_mask.sum()),
+            power=weighting.power,
+            pt_clip_min_gev=weighting.pt_min_gev,
+            pt_clip_max_gev=weighting.pt_max_gev,
         )
 
     region_ids = np.digitize(truth_pt_gev, edges[1:-1], right=False)
@@ -244,6 +313,21 @@ def calculate_sample_weights(fitted_weighting, metadata, labels):
 
     signal_mask = labels == 1
     truth_pt_gev = _truth_pt_gev(metadata, labels)
+    if fitted_weighting.profile == "power_law":
+        signal_pt = truth_pt_gev[signal_mask]
+        if np.any(~np.isfinite(signal_pt)) or np.any(signal_pt <= 0):
+            raise ValueError("power-law weighting requires finite positive signal truth_pt")
+        clipped = np.clip(
+            signal_pt,
+            fitted_weighting.pt_clip_min_gev,
+            fitted_weighting.pt_clip_max_gev,
+        )
+        raw = np.power(clipped, -fitted_weighting.power, dtype=np.float64)
+        weights[signal_mask] = (
+            raw / fitted_weighting.normalization_factor
+        ).astype(np.float32)
+        return weights
+
     edges = np.asarray(fitted_weighting.edges_gev, dtype=np.float64)
     multipliers = np.asarray(fitted_weighting.multipliers, dtype=np.float64)
     region_ids = np.digitize(truth_pt_gev, edges[1:-1], right=False)

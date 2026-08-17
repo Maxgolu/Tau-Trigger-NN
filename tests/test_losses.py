@@ -100,6 +100,52 @@ class EnergyWeightedBCETests(unittest.TestCase):
         ).mean()
         self.assertTrue(torch.allclose(measured, expected))
 
+    def test_power_law_profile_is_continuous_clamped_and_normalized(self):
+        labels = np.asarray([1, 1, 1, 1, 0])
+        metadata = pd.DataFrame(
+            {"truth_pt": [5_000, 20_000, 100_000, 400_000, 0]}
+        )
+        loss = parse_loss(
+            {
+                "loss": {
+                    "name": "energy_weighted_bce",
+                    "weighting": {
+                        "profile": "power_law",
+                        "p": -1.0,
+                        "pt_clip_min_gev": 10.0,
+                        "pt_clip_max_gev": 200.0,
+                    },
+                }
+            }
+        )
+
+        fitted = fit_loss_weighting(loss, metadata, labels)
+        weights = calculate_sample_weights(fitted, metadata, labels)
+
+        self.assertAlmostEqual(float(weights[labels == 1].mean()), 1.0, places=6)
+        self.assertEqual(float(weights[-1]), 1.0)
+        self.assertAlmostEqual(float(weights[0]), 10.0 / 82.5, places=6)
+        self.assertAlmostEqual(float(weights[3]), 200.0 / 82.5, places=6)
+        self.assertGreater(weights[2], weights[1])
+
+    def test_power_zero_matches_unweighted_bce(self):
+        labels = np.asarray([1, 1, 0])
+        metadata = pd.DataFrame({"truth_pt": [20_000, 80_000, 0]})
+        loss = parse_loss(
+            {
+                "loss": {
+                    "name": "energy_weighted_bce",
+                    "weighting": {"profile": "power_law", "p": 0.0},
+                }
+            }
+        )
+
+        fitted = fit_loss_weighting(loss, metadata, labels)
+        weights = calculate_sample_weights(fitted, metadata, labels)
+
+        np.testing.assert_allclose(weights, np.ones(3, dtype=np.float32))
+        self.assertEqual(fitted.to_dict()["p"], 0.0)
+
     def test_invalid_weight_profile_is_rejected(self):
         with self.assertRaises(ValueError):
             parse_loss(

@@ -191,6 +191,22 @@ Every alpha is a separate full training run. The inverse-frequency profile uses
 5-GeV signal bins from 25 to 100 GeV by default; its range, bin width, and weight
 limits can be changed through the `--loss-inverse-*` options.
 
+A continuous power-law profile applies `clip(truth_pt, 10, 200)^(-p)` to signal
+objects and normalizes the mean training-signal weight to one. Background weights
+remain one. Multiple exponents can be generated without editing code:
+
+```bash
+python generate_configs.py --output-dir configs/power_law_screen \
+  --feature-set "core_tensors" \
+  --seeds 42 \
+  --loss energy_weighted_bce \
+  --loss-power-p -1 -0.6 -0.3 0 0.3 0.6 1
+```
+
+The clamp can be changed with `--loss-power-pt-min` and
+`--loss-power-pt-max`. Here `p=0` is exactly ordinary BCE, negative values
+emphasize higher-pT signal, and positive values emphasize lower-pT signal.
+
 ### Step 2: Train the Network
 Main training script. 
 Standard usage is giving it a config directory, and it will generate an "experiment" folder for each JSON config file within that directory.
@@ -305,8 +321,8 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * **Hybrid classifier:** `tob_nn_or` accepts each object when either the TOB-pT branch or NN branch passes. Both thresholds are calibrated at event level, including mixed events where each branch contributes one accepted object.
 * **TOB-budget search:** `validation_search` jointly selects the checkpoint and TOB budget. Complete events stay together in deterministic cross-fitting folds. The objective maximizes the mean OR-minus-baseline efficiency in 5-GeV windows from 25 to 100 GeV. Noninferiority protects fine windows below 60 GeV and one pooled 60--120 GeV saturation region by default, avoiding vetoes from statistically sparse high-pT windows.
 * **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
-* **Energy-weighted BCE:** `energy_weighted_bce` supports fixed alpha profiles and training-fitted inverse-frequency profiles. Only signal examples are redistributed across truth-pT regions; background weights remain one.
-* **Weight normalization:** Signal weights are divided by their mean on the training split, preserving the total signal contribution. Inverse-frequency weights are bounded before normalization to limit gradient variance. The fitted profile is reused unchanged on validation data and saved in `checkpoint_selection.json`.
+* **Energy-weighted BCE:** `energy_weighted_bce` supports fixed alpha, training-fitted inverse-frequency, and continuous power-law profiles. Only signal examples are redistributed across truth-pT regions; background weights remain one.
+* **Weight normalization:** Signal weights are divided by their mean on the training split, preserving the total signal contribution. Inverse-frequency weights are bounded and power-law pT values are clamped before normalization to limit gradient variance. The fitted profile is reused unchanged on validation data and saved in `checkpoint_selection.json`.
 
 ### 5. Evaluation & Metrics (`src/evaluate.py`)
 The evaluation script operates on the `predictions.parquet` files generated during testing.  

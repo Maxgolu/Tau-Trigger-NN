@@ -199,8 +199,27 @@ def parse_args():
         "--loss-alpha",
         nargs="+",
         type=float,
-        default=[0.0],
+        default=None,
         help="Alpha values generated for energy-weighted BCE.",
+    )
+    parser.add_argument(
+        "--loss-power-p",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Exponents p generated for continuous signal weights t^(-p).",
+    )
+    parser.add_argument(
+        "--loss-power-pt-min",
+        type=float,
+        default=10.0,
+        help="Lower truth-pT clamp for power-law weighting (default: 10 GeV).",
+    )
+    parser.add_argument(
+        "--loss-power-pt-max",
+        type=float,
+        default=200.0,
+        help="Upper truth-pT clamp for power-law weighting (default: 200 GeV).",
     )
     parser.add_argument(
         "--loss-include-inverse-frequency",
@@ -311,6 +330,8 @@ def generate_sweep_configs(
             weighting = loss_variant["weighting"]
             if weighting["profile"] == "alpha":
                 loss_tag = f"ewbce_a{weighting['alpha']:g}"
+            elif weighting["profile"] == "power_law":
+                loss_tag = f"ewbce_power_p{weighting['p']:g}"
             else:
                 loss_tag = "ewbce_invfreq"
             experiment_name = f"{experiment_name}_{loss_tag}"
@@ -411,7 +432,9 @@ if __name__ == "__main__":
         if args.loss == "bce":
             loss_variants = [{"name": "bce"}]
         elif args.loss == "energy_weighted_bce":
-            if any(alpha < 0 for alpha in args.loss_alpha):
+            requested_alphas = args.loss_alpha or []
+            requested_powers = args.loss_power_p or []
+            if any(alpha < 0 for alpha in requested_alphas):
                 raise ValueError("--loss-alpha values must be non-negative")
             loss_variants = [
                 {
@@ -421,8 +444,24 @@ if __name__ == "__main__":
                         "alpha": alpha,
                     },
                 }
-                for alpha in args.loss_alpha
+                for alpha in requested_alphas
             ]
+            if not 0 < args.loss_power_pt_min < args.loss_power_pt_max:
+                raise ValueError(
+                    "Power-law pT limits must satisfy 0 < min < max"
+                )
+            loss_variants.extend(
+                {
+                    "name": "energy_weighted_bce",
+                    "weighting": {
+                        "profile": "power_law",
+                        "p": power,
+                        "pt_clip_min_gev": args.loss_power_pt_min,
+                        "pt_clip_max_gev": args.loss_power_pt_max,
+                    },
+                }
+                for power in requested_powers
+            )
             if args.loss_include_inverse_frequency:
                 loss_variants.append(
                     {
@@ -437,6 +476,13 @@ if __name__ == "__main__":
                         },
                     }
                 )
+            if not loss_variants:
+                loss_variants = [
+                    {
+                        "name": "energy_weighted_bce",
+                        "weighting": {"profile": "alpha", "alpha": 0.0},
+                    }
+                ]
 
         generate_sweep_configs(
             output_dir=args.output_dir,
