@@ -1,0 +1,84 @@
+{
+    "epochs": 20,
+    "run_id": "c010_s456",
+    "experiment_name": "TauNet_lr0.001_bs256_arch32x16_em0_sparsity_em1_sparsity_em2_3x3_sparsity_em3_sparsity_had_sparsity_em0_sum_em1_sum_em2_3x3_sum_em3_sum_had_sum_em0_dominance_em1_dominance_em2_3x3_dominance_em3_dominance_had_dominance_em2_best_3x3_fraction_ewbce_power_p-1",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [
+        32,
+        16
+    ],
+    "features_to_use": [
+        "em0_sparsity",
+        "em1_sparsity",
+        "em2_3x3_sparsity",
+        "em3_sparsity",
+        "had_sparsity",
+        "em0_sum",
+        "em1_sum",
+        "em2_3x3_sum",
+        "em3_sum",
+        "had_sum",
+        "em0_dominance",
+        "em1_dominance",
+        "em2_3x3_dominance",
+        "em3_dominance",
+        "had_dominance",
+        "em2_best_3x3_fraction"
+    ],
+    "seed": 456,
+    "checkpoint_selection": {
+        "methods": [
+            "target_fpr"
+        ],
+        "primary_method": "target_fpr",
+        "target_fpr": 0.005
+    },
+    "classifier": {
+        "name": "tob_nn_or",
+        "target_fpr": 0.005,
+        "trigger_objects": 2,
+        "tob_budget": {
+            "mode": "validation_search",
+            "values": [
+                0.0,
+                0.0005,
+                0.001,
+                0.0015,
+                0.002,
+                0.0025,
+                0.003,
+                0.0035,
+                0.004,
+                0.0045,
+                0.005
+            ],
+            "cross_validation_folds": 2,
+            "objective": {
+                "min_truth_pt_gev": 25.0,
+                "objective_max_truth_pt_gev": 100.0,
+                "window_width_gev": 5.0,
+                "protected_max_truth_pt_gev": 120.0,
+                "noninferiority_mode": "multiscale_saturation",
+                "saturation_start_truth_pt_gev": 60.0,
+                "noninferiority_tolerance": 0.005,
+                "saturation_window_width_gev": 30.0,
+                "saturation_window_stride_gev": 10.0,
+                "include_full_saturation_pool": true,
+                "uncertainty_mode": "paired_standard_error",
+                "confidence_z": 1.0,
+                "allowed_physical_deficit": 0.005,
+                "objective_tie_tolerance": 0.002
+            }
+        }
+    },
+    "loss": {
+        "name": "energy_weighted_bce",
+        "weighting": {
+            "profile": "power_law",
+            "p": -1.0,
+            "pt_clip_min_gev": 10.0,
+            "pt_clip_max_gev": 200.0
+        }
+    }
+}
