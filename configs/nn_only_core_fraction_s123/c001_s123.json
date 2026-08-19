@@ -1,0 +1,32 @@
+{
+    "epochs": 20,
+    "run_id": "c001_s123",
+    "experiment_name": "TauNet_core_tensors_em2_best_3x3_fraction_nn_only_power_p-1",
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "hidden_layers": [32, 16],
+    "features_to_use": [
+        "core_tensors",
+        "em2_best_3x3_fraction"
+    ],
+    "seed": 123,
+    "checkpoint_selection": {
+        "methods": ["target_fpr"],
+        "primary_method": "target_fpr",
+        "target_fpr": 0.005
+    },
+    "classifier": {
+        "name": "nn_only",
+        "target_fpr": 0.005,
+        "trigger_objects": 2
+    },
+    "loss": {
+        "name": "energy_weighted_bce",
+        "weighting": {
+            "profile": "power_law",
+            "p": -1.0,
+            "pt_clip_min_gev": 10.0,
+            "pt_clip_max_gev": 200.0
+        }
+    }
+}
