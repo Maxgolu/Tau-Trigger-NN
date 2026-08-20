@@ -230,10 +230,25 @@ def parse_args():
         help="Projected dual-ascent learning rate (default: 1).",
     )
     parser.add_argument(
+        "--constrained-initial-fpr-multiplier-mode",
+        choices=["fixed", "gradient_balance"],
+        default="fixed",
+        help=(
+            "Initialize the FPR price from a fixed value or from training-only "
+            "gradient scales (default: fixed)."
+        ),
+    )
+    parser.add_argument(
         "--constrained-initial-fpr-multiplier",
         type=float,
         default=1.0,
-        help="Initial price of the event-FPR constraint (default: 1).",
+        help="Fixed or fallback initial event-FPR price (default: 1).",
+    )
+    parser.add_argument(
+        "--constrained-gradient-balance-batches",
+        type=int,
+        default=8,
+        help="Training batches used for robust gradient balancing (default: 8).",
     )
     parser.add_argument(
         "--constrained-event-batch-size",
@@ -582,7 +597,13 @@ if __name__ == "__main__":
                     "allowed_deficits": [region[3] for region in parsed_regions],
                     "constraint_fraction": args.constrained_constraint_fraction,
                     "dual_learning_rate": args.constrained_dual_learning_rate,
+                    "initial_fpr_multiplier_mode": (
+                        args.constrained_initial_fpr_multiplier_mode
+                    ),
                     "initial_fpr_multiplier": args.constrained_initial_fpr_multiplier,
+                    "gradient_balance_batches": (
+                        args.constrained_gradient_balance_batches
+                    ),
                     "event_batch_size": args.constrained_event_batch_size,
                 }
             ]

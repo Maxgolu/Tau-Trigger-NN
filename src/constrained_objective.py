@@ -33,10 +33,13 @@ class ConstrainedObjectiveConfig:
     dual_learning_rate: float
     dual_update_frequency: int
     dual_warmup_epochs: int
+    initial_fpr_multiplier_mode: str
     initial_fpr_multiplier: float
     initial_region_multiplier: float
     max_multiplier: float
     event_batch_size: int
+    gradient_balance_batches: int
+    gradient_balance_epsilon: float
 
     def to_dict(self):
         return {
@@ -50,10 +53,13 @@ class ConstrainedObjectiveConfig:
             "dual_learning_rate": self.dual_learning_rate,
             "dual_update_frequency": self.dual_update_frequency,
             "dual_warmup_epochs": self.dual_warmup_epochs,
+            "initial_fpr_multiplier_mode": self.initial_fpr_multiplier_mode,
             "initial_fpr_multiplier": self.initial_fpr_multiplier,
             "initial_region_multiplier": self.initial_region_multiplier,
             "max_multiplier": self.max_multiplier,
             "event_batch_size": self.event_batch_size,
+            "gradient_balance_batches": self.gradient_balance_batches,
+            "gradient_balance_epsilon": self.gradient_balance_epsilon,
         }
 
 
@@ -115,10 +121,15 @@ def parse_constrained_objective(config):
         dual_learning_rate=float(raw.get("dual_learning_rate", 1.0)),
         dual_update_frequency=int(raw.get("dual_update_frequency", 1)),
         dual_warmup_epochs=int(raw.get("dual_warmup_epochs", 0)),
+        initial_fpr_multiplier_mode=str(
+            raw.get("initial_fpr_multiplier_mode", "fixed")
+        ),
         initial_fpr_multiplier=float(raw.get("initial_fpr_multiplier", 1.0)),
         initial_region_multiplier=float(raw.get("initial_region_multiplier", 0.0)),
         max_multiplier=float(raw.get("max_multiplier", 10.0)),
         event_batch_size=int(raw.get("event_batch_size", 512)),
+        gradient_balance_batches=int(raw.get("gradient_balance_batches", 8)),
+        gradient_balance_epsilon=float(raw.get("gradient_balance_epsilon", 1e-12)),
     )
     if result.temperature <= 0.0:
         raise ValueError("Constrained temperature must be positive")
@@ -132,10 +143,16 @@ def parse_constrained_objective(config):
         raise ValueError("dual_learning_rate must be positive")
     if result.dual_update_frequency < 1 or result.dual_warmup_epochs < 0:
         raise ValueError("Invalid constrained dual update schedule")
+    if result.initial_fpr_multiplier_mode not in {"fixed", "gradient_balance"}:
+        raise ValueError(
+            "initial_fpr_multiplier_mode must be 'fixed' or 'gradient_balance'"
+        )
     if result.initial_fpr_multiplier < 0.0 or result.initial_region_multiplier < 0.0:
         raise ValueError("Initial constrained multipliers must be non-negative")
     if result.max_multiplier <= 0.0 or result.event_batch_size < 1:
         raise ValueError("Invalid constrained multiplier cap or event batch size")
+    if result.gradient_balance_batches < 1 or result.gradient_balance_epsilon <= 0.0:
+        raise ValueError("Invalid constrained gradient-balance settings")
     return result
 
 

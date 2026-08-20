@@ -46,6 +46,149 @@ def constrained_primal_loss(metrics, dual_state):
     )
 
 
+def parameter_gradient_norm(value, parameters, retain_graph=True):
+    """Measure one objective's gradient scale without changing model gradients."""
+    gradients = torch.autograd.grad(
+        value,
+        tuple(parameters),
+        retain_graph=retain_graph,
+        allow_unused=True,
+    )
+    squared_norm = value.new_zeros(())
+    for gradient in gradients:
+        if gradient is not None:
+            squared_norm = squared_norm + torch.sum(gradient.detach() ** 2)
+    return torch.sqrt(squared_norm)
+
+
+def _soft_batch_metrics(
+    model,
+    batch,
+    classifier_config,
+    objective_config,
+    fixed_nn_threshold,
+    fixed_tob_threshold,
+    baseline_threshold_gev,
+):
+    """Build the differentiable objective for one complete-event batch."""
+    scores = _event_model_scores(model, batch)
+    pass_probabilities = soft_object_pass(
+        scores,
+        fixed_nn_threshold,
+        objective_config.temperature,
+        classifier_config.name,
+        batch.tob_pt_gev,
+        fixed_tob_threshold,
+    )
+    baseline_pass = batch.tob_pt_gev >= baseline_threshold_gev
+    metrics = calculate_soft_constraint_metrics(
+        pass_probabilities,
+        batch.object_mask,
+        batch.signal_object_mask,
+        batch.background_event_mask,
+        batch.truth_pt_gev,
+        baseline_pass,
+        objective_config,
+    )
+    return scores, metrics
+
+
+def initialize_fpr_multiplier_from_gradients(
+    model,
+    batches,
+    classifier_config,
+    objective_config,
+    fixed_nn_threshold,
+    fixed_tob_threshold,
+    baseline_threshold_gev,
+):
+    """Balance initial objective and FPR gradient scales on training batches."""
+    parameters = tuple(
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    )
+    measurements = []
+    model.train()
+    for batch_index, batch in enumerate(batches):
+        if batch_index >= objective_config.gradient_balance_batches:
+            break
+        _, metrics = _soft_batch_metrics(
+            model,
+            batch,
+            classifier_config,
+            objective_config,
+            fixed_nn_threshold,
+            fixed_tob_threshold,
+            baseline_threshold_gev,
+        )
+        objective_norm = parameter_gradient_norm(
+            metrics.objective,
+            parameters,
+            retain_graph=True,
+        )
+        fpr_norm = parameter_gradient_norm(
+            metrics.event_fpr,
+            parameters,
+            retain_graph=False,
+        )
+        objective_value = float(objective_norm.detach().cpu())
+        fpr_value = float(fpr_norm.detach().cpu())
+        if np.isfinite(objective_value) and np.isfinite(fpr_value):
+            ratio = objective_value / (
+                fpr_value + objective_config.gradient_balance_epsilon
+            )
+            measurements.append(
+                {
+                    "soft_objective": float(metrics.objective.detach().cpu()),
+                    "soft_event_fpr": float(metrics.event_fpr.detach().cpu()),
+                    "objective_gradient_norm": objective_value,
+                    "fpr_gradient_norm": fpr_value,
+                    "ratio": float(ratio),
+                }
+            )
+    if not measurements:
+        raise RuntimeError("Could not measure constrained gradient scales")
+
+    ratios = np.asarray([item["ratio"] for item in measurements], dtype=np.float64)
+    recommended = float(np.median(ratios))
+    selected = objective_config.initial_fpr_multiplier
+    if objective_config.initial_fpr_multiplier_mode == "gradient_balance":
+        selected = float(np.clip(recommended, 0.0, objective_config.max_multiplier))
+    return selected, {
+        "mode": objective_config.initial_fpr_multiplier_mode,
+        "fixed_fallback": objective_config.initial_fpr_multiplier,
+        "recommended_unclipped": recommended,
+        "selected": selected,
+        "batches_measured": len(measurements),
+        "measurements": measurements,
+    }
+
+
+def _score_quantiles(frame, scores):
+    """Summarize score motion separately for truth taus and background objects."""
+    scores = np.asarray(scores, dtype=np.float64)
+    signal_mask = (
+        (frame["Type"].to_numpy() == "Signal")
+        & (frame["signal"].to_numpy(dtype=np.int64) == 1)
+    )
+    background_mask = frame["Type"].isin(["BKG", "Background"]).to_numpy()
+
+    def summarize(mask):
+        values = scores[mask]
+        if not len(values):
+            return None
+        probabilities = [0.01, 0.1, 0.5, 0.9, 0.99]
+        quantiles = np.quantile(values, probabilities)
+        return {
+            f"q{int(probability * 100):02d}": float(value)
+            for probability, value in zip(probabilities, quantiles)
+        }
+
+    return {
+        "signal": summarize(signal_mask),
+        "background": summarize(background_mask),
+    }
+
+
 @torch.no_grad()
 def update_dual_state(dual_state, hard_violations, learning_rate, maximum):
     """Ascend on measured violations and project prices to a finite interval."""
@@ -255,14 +398,39 @@ def run_constrained_training_pipeline(
         shuffle=True,
         collate_fn=collate_events,
     )
+    balance_generator = torch.Generator().manual_seed(seed + 20_000)
+    balance_loader = DataLoader(
+        primal_dataset,
+        batch_size=objective_config.event_batch_size,
+        shuffle=True,
+        generator=balance_generator,
+        collate_fn=collate_events,
+    )
     optimizer = optim.Adam(
         model.parameters(),
         lr=float(config.get("learning_rate", 0.0001)),
     )
+    initial_fpr_multiplier, gradient_initialization = (
+        initialize_fpr_multiplier_from_gradients(
+            model,
+            (batch.to(device) for batch in balance_loader),
+            classifier_config,
+            objective_config,
+            fixed_nn_threshold,
+            fixed_tob_threshold,
+            baseline_threshold_gev,
+        )
+    )
+    print(
+        "FPR multiplier initialization: "
+        f"mode={gradient_initialization['mode']} | "
+        f"selected={initial_fpr_multiplier:.6f} | "
+        f"gradient ratio={gradient_initialization['recommended_unclipped']:.6f}"
+    )
     dual_state = DualState(
         multipliers=torch.tensor(
             [
-                objective_config.initial_fpr_multiplier,
+                initial_fpr_multiplier,
                 *(
                     [objective_config.initial_region_multiplier]
                     * len(objective_config.regions_gev)
@@ -303,6 +471,13 @@ def run_constrained_training_pipeline(
             "dual_state": dual_state.to_dict(),
             "constraint_training": initial_constraint,
             "validation": initial_validation,
+            "diagnostics": {
+                "gradient_initialization": gradient_initialization,
+                "score_quantiles": _score_quantiles(
+                    constraint_frame,
+                    constraint_scores,
+                ),
+            },
         }
     )
     best_record = copy.deepcopy(initial_validation)
@@ -320,29 +495,46 @@ def run_constrained_training_pipeline(
         model.train()
         epoch_loss = 0.0
         epoch_bce = 0.0
+        epoch_soft_objective = 0.0
+        epoch_soft_fpr = 0.0
+        epoch_gradient_norms = None
         batch_count = 0
         for batch in primal_loader:
             batch = batch.to(device)
             optimizer.zero_grad()
-            scores = _event_model_scores(model, batch)
-            pass_probabilities = soft_object_pass(
-                scores,
-                fixed_nn_threshold,
-                objective_config.temperature,
-                classifier_config.name,
-                batch.tob_pt_gev,
-                fixed_tob_threshold,
-            )
-            baseline_pass = batch.tob_pt_gev >= baseline_threshold_gev
-            metrics = calculate_soft_constraint_metrics(
-                pass_probabilities,
-                batch.object_mask,
-                batch.signal_object_mask,
-                batch.background_event_mask,
-                batch.truth_pt_gev,
-                baseline_pass,
+            scores, metrics = _soft_batch_metrics(
+                model,
+                batch,
+                classifier_config,
                 objective_config,
+                fixed_nn_threshold,
+                fixed_tob_threshold,
+                baseline_threshold_gev,
             )
+            if epoch_gradient_norms is None:
+                parameters = tuple(
+                    parameter
+                    for parameter in model.parameters()
+                    if parameter.requires_grad
+                )
+                objective_norm = parameter_gradient_norm(
+                    metrics.objective,
+                    parameters,
+                    retain_graph=True,
+                )
+                fpr_norm = parameter_gradient_norm(
+                    metrics.event_fpr,
+                    parameters,
+                    retain_graph=True,
+                )
+                epoch_gradient_norms = {
+                    "objective": float(objective_norm.detach().cpu()),
+                    "event_fpr": float(fpr_norm.detach().cpu()),
+                    "weighted_event_fpr": float(
+                        dual_state.multipliers[0].detach().cpu()
+                        * fpr_norm.detach().cpu()
+                    ),
+                }
             loss = constrained_primal_loss(metrics, dual_state)
             loss.backward()
             optimizer.step()
@@ -351,6 +543,8 @@ def run_constrained_training_pipeline(
             valid_labels = batch.labels[batch.object_mask].reshape(-1)
             epoch_bce += bce_monitor(valid_scores, valid_labels).item()
             epoch_loss += loss.item()
+            epoch_soft_objective += float(metrics.objective.detach().cpu())
+            epoch_soft_fpr += float(metrics.event_fpr.detach().cpu())
             batch_count += 1
 
         constraint_scores = _predict_numpy(
@@ -402,6 +596,21 @@ def run_constrained_training_pipeline(
             "dual_state": dual_state.to_dict(),
             "constraint_training": hard_constraint,
             "validation": hard_validation,
+            "diagnostics": {
+                "soft_training": {
+                    "objective_mean": float(
+                        epoch_soft_objective / max(batch_count, 1)
+                    ),
+                    "event_fpr_mean": float(
+                        epoch_soft_fpr / max(batch_count, 1)
+                    ),
+                },
+                "gradient_norms_first_batch": epoch_gradient_norms,
+                "score_quantiles": _score_quantiles(
+                    constraint_frame,
+                    constraint_scores,
+                ),
+            },
         }
         history.append(record)
         print(
@@ -418,6 +627,9 @@ def run_constrained_training_pipeline(
             best_dual = copy.deepcopy(dual_state.to_dict())
             best_optimizer = copy.deepcopy(optimizer.state_dict())
 
+    last_epoch_weights = copy.deepcopy(model.state_dict())
+    last_weights_path = Path(tracker.experiment_dir) / "last_epoch_weights.pt"
+    torch.save(last_epoch_weights, last_weights_path)
     model.load_state_dict(best_weights)
     test_scores = _predict_numpy(model, X_test, object_batch_size, device)
     output_frame = test_frame.copy()
@@ -451,10 +663,12 @@ def run_constrained_training_pipeline(
             "initial_weights": str(weights_path),
             "fixed_training_calibration": calibration,
             "baseline_threshold_gev": baseline_threshold_gev,
+            "gradient_initialization": gradient_initialization,
             "best_validation_record": best_record,
             "history": history,
             "artifacts": {
                 "weights": "model_weights.pt",
+                "last_epoch_weights": last_weights_path.name,
                 "checkpoint": checkpoint_path.name,
                 "predictions": Path(predictions_path).name,
             },
@@ -473,6 +687,7 @@ def run_constrained_training_pipeline(
                 "target_fpr": {
                     "role": "primary",
                     "weights": "model_weights.pt",
+                    "last_epoch_weights": last_weights_path.name,
                     "predictions": Path(predictions_path).name,
                     "best_validation_record": best_record,
                 }

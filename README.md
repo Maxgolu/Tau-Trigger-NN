@@ -221,7 +221,16 @@ coarse energy noninferiority constraints. The training split is divided by
 event into independent primal and constraint subsets; validation still selects
 the checkpoint and test remains untouched. Example NN-only and fixed-budget OR
 configs are under `configs/constrained_stage_d_nn_s42/` and
-`configs/constrained_stage_e_or_s42/`.
+`configs/constrained_stage_e_or_s42/`. The gradient-balanced NN-only follow-up
+is under `configs/constrained_stage_d2_nn_gradbalance_s42/`.
+
+The event-FPR multiplier can use the legacy fixed initialization or
+`initial_fpr_multiplier_mode: "gradient_balance"`. Gradient balancing measures
+the objective and FPR gradient norms on training batches only, uses their median
+ratio, and clips it to the configured multiplier limit. Each epoch records soft
+and hard metrics, gradient scales, and signal/background score quantiles. The
+best checkpoint remains the primary output, while `last_epoch_weights.pt` is
+saved only for debugging failed or unstable training.
 
 Before training, saved predictions can be used to verify that smooth and exact
 trigger metrics behave consistently across several temperatures:
