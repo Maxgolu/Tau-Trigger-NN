@@ -40,6 +40,10 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── classifier_selection.py  # Cross-fitted validation search for the TOB branch budget
 │   ├── losses.py                # Configurable training-loss construction
 │   ├── checkpoint_selection.py  # Configurable validation checkpoint selection
+│   ├── constrained_objective.py # Smooth and exact constrained trigger metrics
+│   ├── constrained_training.py  # Event-level primal/dual fine-tuning loop
+│   ├── constrained_diagnostics.py # Pre-training hard/soft surrogate audit
+│   ├── event_data.py            # Complete-event batching and inner training split
 │   └── train.py                 # Main training loop and configuration-sweep orchestration
 ├── tests/                       # Automated correctness checks for reusable project logic
 │   ├── test_distributions.py    # Distribution, event grouping, and split regression tests
@@ -49,6 +53,9 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_classifiers.py      # Classifier calibration, FPR, and composition tests
 │   ├── test_classifier_selection.py # TOB-budget search and validation-fold tests
 │   ├── test_losses.py           # Energy-weighted loss and normalization tests
+│   ├── test_constrained_objective.py # Trigger-surrogate regression tests
+│   ├── test_constrained_training.py # Primal/dual update regression tests
+│   ├── test_event_data.py       # Complete-event batching and leakage tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── slurm/
 │   └── run_config_batch.slurm   # Reusable GPU runner for a generated configuration batch
@@ -207,6 +214,31 @@ The clamp can be changed with `--loss-power-pt-min` and
 `--loss-power-pt-max`. Here `p=0` is exactly ordinary BCE, negative values
 emphasize higher-pT signal, and positive values emphasize lower-pT signal.
 
+Direct constrained fine-tuning is selected with `loss.name` set to
+`constrained_trigger`. It starts from an existing checkpoint, keeps complete
+events together, and optimizes smooth signal efficiency under event-FPR and
+coarse energy noninferiority constraints. The training split is divided by
+event into independent primal and constraint subsets; validation still selects
+the checkpoint and test remains untouched. Example NN-only and fixed-budget OR
+configs are under `configs/constrained_stage_d_nn_s42/` and
+`configs/constrained_stage_e_or_s42/`.
+
+Before training, saved predictions can be used to verify that smooth and exact
+trigger metrics behave consistently across several temperatures:
+
+```bash
+python src/constrained_diagnostics.py \
+  experiments/nn_only_core_fraction_s42 \
+  --classifier nn_only \
+  --temperatures 0.02 0.05 0.1
+```
+
+This is an engineering audit only; test predictions must not select scientific
+hyperparameters. New constrained configs can also be generated with
+`--loss constrained_trigger`, `--constrained-initial-weights`, repeated
+`--constrained-region LOW,HIGH,WEIGHT,DEFICIT`, and the other
+`--constrained-*` options.
+
 ### Step 2: Train the Network
 Main training script. 
 Standard usage is giving it a config directory, and it will generate an "experiment" folder for each JSON config file within that directory.
@@ -323,6 +355,7 @@ Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron buil
 * **Validation safety:** During training, classifier thresholds and target-FPR checkpoints use validation data only. The calibrated decision is then fixed for test evaluation.
 * **Energy-weighted BCE:** `energy_weighted_bce` supports fixed alpha, training-fitted inverse-frequency, and continuous power-law profiles. Only signal examples are redistributed across truth-pT regions; background weights remain one.
 * **Weight normalization:** Signal weights are divided by their mean on the training split, preserving the total signal contribution. Inverse-frequency weights are bounded and power-law pT values are clamped before normalization to limit gradient variance. The fitted profile is reused unchanged on validation data and saved in `checkpoint_selection.json`.
+* **Direct constrained objective:** `constrained_trigger` replaces hand-written energy weights with a smooth event-level objective. Network weights descend on the surrogate while non-negative multipliers ascend from exact measurements on a separate training-event subset. NN-only and fixed-budget OR classifiers use the same implementation through config.
 
 ### 5. Evaluation & Metrics (`src/evaluate.py`)
 The evaluation script operates on the `predictions.parquet` files generated during testing.  

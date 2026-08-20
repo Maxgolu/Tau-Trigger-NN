@@ -17,6 +17,12 @@ from losses import (
 
 
 class EnergyWeightedBCETests(unittest.TestCase):
+    def test_constrained_loss_is_selected_by_name_but_not_built_as_object_bce(self):
+        loss = parse_loss({"loss": {"name": "constrained_trigger"}})
+        self.assertEqual(loss.name, "constrained_trigger")
+        with self.assertRaisesRegex(ValueError, "event-level"):
+            build_loss(loss)
+
     def test_alpha_profile_is_normalized_on_training_signal(self):
         labels = np.asarray([1, 1, 1, 1, 1, 1, 0])
         metadata = pd.DataFrame(

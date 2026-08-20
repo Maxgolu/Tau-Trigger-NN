@@ -30,6 +30,7 @@ from checkpoint_selection import (
     is_better_checkpoint,
     parse_checkpoint_selection,
 )
+from constrained_training import run_constrained_training_pipeline
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +138,19 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     # The shared cache is supplied by main() when a config directory is used.
     if data_cache is None:
         data_cache = TrainingDataCache(enabled=False)
+
+    # The direct trigger objective needs complete events and a separate dual
+    # update, so config selection dispatches it before the object-level path.
+    if config.get("loss", {}).get("name") == "constrained_trigger":
+        return run_constrained_training_pipeline(
+            config_path=config_path,
+            data_dir=data_dir,
+            experiments_dir=experiments_dir,
+            project_root=PROJECT_ROOT,
+            max_events_per_class=max_events_per_class,
+            epochs_override=epochs_override,
+            data_cache=data_cache,
+        )
 
     seed = config.get("seed", 42)
     print(f"\n[{config.get('experiment_name')}] Locking random seed to: {seed}")

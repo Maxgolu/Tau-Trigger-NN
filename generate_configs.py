@@ -191,9 +191,55 @@ def parse_args():
     )
     parser.add_argument(
         "--loss",
-        choices=["bce", "energy_weighted_bce"],
+        choices=["bce", "energy_weighted_bce", "constrained_trigger"],
         default=None,
         help="Training loss (default: legacy bce).",
+    )
+    parser.add_argument(
+        "--constrained-initial-weights",
+        type=str,
+        default=None,
+        help="Pretrained model weights used to initialize constrained fine-tuning.",
+    )
+    parser.add_argument(
+        "--constrained-temperature",
+        type=float,
+        default=0.02,
+        help="Smooth trigger temperature (default: 0.02 after surrogate audit).",
+    )
+    parser.add_argument(
+        "--constrained-region",
+        action="append",
+        default=None,
+        metavar="LOW,HIGH,WEIGHT,DEFICIT",
+        help=(
+            "Constrained truth-pT region in GeV with objective weight and "
+            "allowed deficit. Repeat for multiple regions."
+        ),
+    )
+    parser.add_argument(
+        "--constrained-constraint-fraction",
+        type=float,
+        default=0.3,
+        help="Fraction of training events reserved for dual updates (default: 0.3).",
+    )
+    parser.add_argument(
+        "--constrained-dual-learning-rate",
+        type=float,
+        default=1.0,
+        help="Projected dual-ascent learning rate (default: 1).",
+    )
+    parser.add_argument(
+        "--constrained-initial-fpr-multiplier",
+        type=float,
+        default=1.0,
+        help="Initial price of the event-FPR constraint (default: 1).",
+    )
+    parser.add_argument(
+        "--constrained-event-batch-size",
+        type=int,
+        default=512,
+        help="Complete events per primal update (default: 512).",
     )
     parser.add_argument(
         "--loss-alpha",
@@ -292,6 +338,7 @@ def generate_sweep_configs(
     classifier=None,
     loss=None,
     loss_variants=None,
+    initialization=None,
 ):
     base_config = {"epochs": 20}
     learning_rates = [0.001]
@@ -323,9 +370,16 @@ def generate_sweep_configs(
         combinations,
         start=1,
     ):
+        constrained = (
+            loss_variant is not None
+            and loss_variant.get("name") == "constrained_trigger"
+        )
+        run_learning_rate = 0.0001 if constrained else lr
         features_str = "_".join(features)
         arch_str = "x".join(map(str, arch))
-        experiment_name = f"TauNet_lr{lr}_bs{bs}_arch{arch_str}_{features_str}"
+        experiment_name = (
+            f"TauNet_lr{run_learning_rate}_bs{bs}_arch{arch_str}_{features_str}"
+        )
         if loss_variant is not None and loss_variant.get("name") == "energy_weighted_bce":
             weighting = loss_variant["weighting"]
             if weighting["profile"] == "alpha":
@@ -335,15 +389,19 @@ def generate_sweep_configs(
             else:
                 loss_tag = "ewbce_invfreq"
             experiment_name = f"{experiment_name}_{loss_tag}"
+        elif loss_variant is not None and loss_variant.get("name") == "constrained_trigger":
+            experiment_name = f"{experiment_name}_constrained"
 
         for seed in seeds:
             config = base_config.copy()
+            if constrained:
+                config["epochs"] = 10
             config.update(
                 {
                     # Short IDs are used only for paths. Full metadata remains below.
                     "run_id": f"c{config_number:03d}_s{seed}",
                     "experiment_name": experiment_name,
-                    "learning_rate": lr,
+                    "learning_rate": run_learning_rate,
                     "batch_size": bs,
                     "hidden_layers": arch,
                     "features_to_use": features,
@@ -356,6 +414,8 @@ def generate_sweep_configs(
                 config["classifier"] = classifier
             if loss_variant is not None:
                 config["loss"] = loss_variant
+            if initialization is not None:
+                config["initialization"] = initialization
             filename = f"c{config_number:03d}_s{seed}.json"
             write_config(config, output_dir, filename)
             count += 1
@@ -429,6 +489,7 @@ if __name__ == "__main__":
                 )
 
         loss_variants = None
+        initialization = None
         if args.loss == "bce":
             loss_variants = [{"name": "bce"}]
         elif args.loss == "energy_weighted_bce":
@@ -483,6 +544,58 @@ if __name__ == "__main__":
                         "weighting": {"profile": "alpha", "alpha": 0.0},
                     }
                 ]
+        elif args.loss == "constrained_trigger":
+            if not args.constrained_initial_weights:
+                raise ValueError(
+                    "--constrained-initial-weights is required for constrained training"
+                )
+            if args.classifier_tob_budget_mode != "fixed":
+                raise ValueError(
+                    "Initial constrained experiments require a fixed classifier budget"
+                )
+            raw_regions = args.constrained_region or [
+                "25,40,0.3333333333333333,0.005",
+                "40,60,0.3333333333333333,0.005",
+                "60,120,0.3333333333333333,0.005",
+            ]
+            parsed_regions = []
+            for raw_region in raw_regions:
+                try:
+                    low, high, weight, deficit = (
+                        float(value.strip()) for value in raw_region.split(",")
+                    )
+                except ValueError as error:
+                    raise ValueError(
+                        "Each --constrained-region must be LOW,HIGH,WEIGHT,DEFICIT"
+                    ) from error
+                parsed_regions.append((low, high, weight, deficit))
+            loss_variants = [
+                {
+                    "name": "constrained_trigger",
+                    "temperature": args.constrained_temperature,
+                    "target_event_fpr": args.classifier_target_fpr,
+                    "trigger_objects": 2,
+                    "regions_gev": [
+                        [region[0], region[1]] for region in parsed_regions
+                    ],
+                    "region_weights": [region[2] for region in parsed_regions],
+                    "allowed_deficits": [region[3] for region in parsed_regions],
+                    "constraint_fraction": args.constrained_constraint_fraction,
+                    "dual_learning_rate": args.constrained_dual_learning_rate,
+                    "initial_fpr_multiplier": args.constrained_initial_fpr_multiplier,
+                    "event_batch_size": args.constrained_event_batch_size,
+                }
+            ]
+            initialization = {
+                "mode": "pretrained",
+                "weights_path": args.constrained_initial_weights,
+            }
+            if classifier is None:
+                classifier = {
+                    "name": "nn_only",
+                    "target_fpr": args.classifier_target_fpr,
+                    "trigger_objects": 2,
+                }
 
         generate_sweep_configs(
             output_dir=args.output_dir,
@@ -491,4 +604,5 @@ if __name__ == "__main__":
             checkpoint_selection=checkpoint_selection,
             classifier=classifier,
             loss_variants=loss_variants,
+            initialization=initialization,
         )

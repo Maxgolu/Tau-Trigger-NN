@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-VALID_LOSSES = ("bce", "energy_weighted_bce")
+VALID_LOSSES = ("bce", "energy_weighted_bce", "constrained_trigger")
 VALID_WEIGHT_PROFILES = ("alpha", "inverse_frequency", "power_law")
 
 
@@ -122,7 +122,7 @@ def parse_loss(config):
     name = raw.get("name", "bce")
     if name not in VALID_LOSSES:
         raise ValueError(f"Unknown loss: {name}")
-    if name == "bce":
+    if name in ("bce", "constrained_trigger"):
         return LossConfig(name=name)
 
     weighting_raw = raw.get("weighting", {})
@@ -182,6 +182,10 @@ def build_loss(loss_config):
         return nn.BCELoss()
     if loss_config.name == "energy_weighted_bce":
         return EnergyWeightedBCELoss()
+    if loss_config.name == "constrained_trigger":
+        raise ValueError(
+            "constrained_trigger uses the event-level constrained training path"
+        )
     raise ValueError(f"Unknown loss: {loss_config.name}")
 
 
@@ -250,7 +254,7 @@ def _power_law_raw(weighting, truth_pt_gev):
 
 def fit_loss_weighting(loss_config, training_metadata, training_labels):
     """Fit energy weights on training data; return None for ordinary BCE."""
-    if loss_config.name == "bce":
+    if loss_config.name in ("bce", "constrained_trigger"):
         return None
 
     labels = np.asarray(training_labels).reshape(-1)
