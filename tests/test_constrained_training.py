@@ -16,6 +16,7 @@ from constrained_training import (
     _is_better_hard_candidate,
     constrained_primal_loss,
     initialize_fpr_multiplier_from_gradients,
+    parameter_gradient_pair_statistics,
     parameter_gradient_norm,
     update_dual_state,
 )
@@ -76,6 +77,21 @@ class ConstrainedTrainingTests(unittest.TestCase):
         )
         self.assertGreater(float(norm), 0.0)
         self.assertTrue(all(parameter.grad is None for parameter in model.parameters()))
+
+    def test_gradient_pair_statistics_reports_direction(self):
+        parameter = torch.tensor([2.0, -1.0], requires_grad=True)
+        first = torch.sum(parameter ** 2)
+        second = 3.0 * first
+        first_norm, second_norm, cosine = parameter_gradient_pair_statistics(
+            first,
+            second,
+            [parameter],
+            retain_graph=False,
+        )
+        self.assertGreater(float(first_norm), 0.0)
+        self.assertGreater(float(second_norm), float(first_norm))
+        self.assertAlmostEqual(float(cosine), 1.0, places=6)
+        self.assertIsNone(parameter.grad)
 
     def test_gradient_balance_selects_training_only_ratio(self):
         model = torch.nn.Sequential(torch.nn.Linear(1, 1), torch.nn.Sigmoid())
@@ -138,6 +154,7 @@ class ConstrainedTrainingTests(unittest.TestCase):
         )
         self.assertEqual(diagnostic["batches_measured"], 1)
         self.assertGreater(diagnostic["recommended_unclipped"], 0.0)
+        self.assertIn("gradient_cosine_similarity", diagnostic["measurements"][0])
         self.assertAlmostEqual(
             selected,
             min(diagnostic["recommended_unclipped"], config.max_multiplier),

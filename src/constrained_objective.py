@@ -29,6 +29,8 @@ class ConstrainedObjectiveConfig:
     regions_gev: tuple[tuple[float, float], ...]
     region_weights: tuple[float, ...]
     allowed_deficits: tuple[float, ...]
+    minimum_region_advantages: tuple[float, ...]
+    reference_model_allowed_deficits: tuple[float, ...] | None
     constraint_fraction: float
     dual_learning_rate: float
     dual_update_frequency: int
@@ -49,6 +51,12 @@ class ConstrainedObjectiveConfig:
             "regions_gev": [list(region) for region in self.regions_gev],
             "region_weights": list(self.region_weights),
             "allowed_deficits": list(self.allowed_deficits),
+            "minimum_region_advantages": list(self.minimum_region_advantages),
+            "reference_model_allowed_deficits": (
+                None
+                if self.reference_model_allowed_deficits is None
+                else list(self.reference_model_allowed_deficits)
+            ),
             "constraint_fraction": self.constraint_fraction,
             "dual_learning_rate": self.dual_learning_rate,
             "dual_update_frequency": self.dual_update_frequency,
@@ -74,6 +82,9 @@ class SoftConstraintMetrics:
     region_deltas: torch.Tensor
     violations: torch.Tensor
     valid_regions: torch.Tensor
+    reference_efficiencies: torch.Tensor | None = None
+    required_efficiencies: torch.Tensor | None = None
+    region_margins: torch.Tensor | None = None
 
 
 def parse_constrained_objective(config):
@@ -103,12 +114,36 @@ def parse_constrained_objective(config):
         float(value)
         for value in raw.get("allowed_deficits", [0.005] * len(regions))
     )
-    if len(weights) != len(regions) or len(deficits) != len(regions):
+    raw_advantages = raw.get("minimum_region_advantages")
+    advantages = (
+        tuple(-value for value in deficits)
+        if raw_advantages is None
+        else tuple(float(value) for value in raw_advantages)
+    )
+    raw_reference_deficits = raw.get("reference_model_allowed_deficits")
+    reference_deficits = (
+        None
+        if raw_reference_deficits is None
+        else tuple(float(value) for value in raw_reference_deficits)
+    )
+    if (
+        len(weights) != len(regions)
+        or len(deficits) != len(regions)
+        or len(advantages) != len(regions)
+        or (
+            reference_deficits is not None
+            and len(reference_deficits) != len(regions)
+        )
+    ):
         raise ValueError("Regions, weights, and deficits must have equal lengths")
     if any(value < 0.0 for value in weights) or not np.isclose(sum(weights), 1.0):
         raise ValueError("Constrained region weights must be non-negative and sum to one")
     if any(value < 0.0 for value in deficits):
         raise ValueError("Constrained allowed deficits must be non-negative")
+    if reference_deficits is not None and any(
+        value < 0.0 for value in reference_deficits
+    ):
+        raise ValueError("Reference-model allowed deficits must be non-negative")
 
     result = ConstrainedObjectiveConfig(
         temperature=float(raw.get("temperature", 0.02)),
@@ -117,6 +152,8 @@ def parse_constrained_objective(config):
         regions_gev=regions,
         region_weights=weights,
         allowed_deficits=deficits,
+        minimum_region_advantages=advantages,
+        reference_model_allowed_deficits=reference_deficits,
         constraint_fraction=float(raw.get("constraint_fraction", 0.3)),
         dual_learning_rate=float(raw.get("dual_learning_rate", 1.0)),
         dual_update_frequency=int(raw.get("dual_update_frequency", 1)),
@@ -221,6 +258,7 @@ def calculate_soft_constraint_metrics(
     truth_pt_gev,
     baseline_object_pass,
     objective_config,
+    reference_object_pass_probabilities=None,
 ):
     """Calculate the differentiable objective and constraint violations."""
     event_pass = probability_at_least_k(
@@ -234,6 +272,7 @@ def calculate_soft_constraint_metrics(
 
     efficiencies = []
     baseline_efficiencies = []
+    reference_efficiencies = []
     valid_regions = []
     for low, high in objective_config.regions_gev:
         in_region = (
@@ -252,10 +291,20 @@ def calculate_soft_constraint_metrics(
             (baseline_object_pass.to(object_pass_probabilities.dtype) * in_region).sum()
             / denominator
         )
+        if reference_object_pass_probabilities is not None:
+            reference_efficiencies.append(
+                (reference_object_pass_probabilities * in_region).sum()
+                / denominator
+            )
         valid_regions.append(valid)
 
     efficiencies = torch.stack(efficiencies)
     baseline_efficiencies = torch.stack(baseline_efficiencies)
+    reference_efficiencies = (
+        None
+        if reference_object_pass_probabilities is None
+        else torch.stack(reference_efficiencies)
+    )
     valid_regions = torch.stack(valid_regions)
     deltas = efficiencies - baseline_efficiencies
     weights = object_pass_probabilities.new_tensor(objective_config.region_weights)
@@ -263,13 +312,27 @@ def calculate_soft_constraint_metrics(
     active_weights = active_weights / active_weights.sum().clamp(min=1e-12)
     objective = torch.sum(active_weights * deltas)
 
-    deficits = object_pass_probabilities.new_tensor(
-        objective_config.allowed_deficits
+    minimum_advantages = object_pass_probabilities.new_tensor(
+        objective_config.minimum_region_advantages
     )
+    required_efficiencies = baseline_efficiencies + minimum_advantages
+    if objective_config.reference_model_allowed_deficits is not None:
+        if reference_efficiencies is None:
+            raise ValueError("Reference-model guards require reference probabilities")
+        reference_deficits = object_pass_probabilities.new_tensor(
+            objective_config.reference_model_allowed_deficits
+        )
+        required_efficiencies = torch.maximum(
+            required_efficiencies,
+            reference_efficiencies - reference_deficits,
+        )
+    # No classifier can exceed unit efficiency in a saturated region.
+    required_efficiencies = required_efficiencies.clamp(max=1.0)
+    region_margins = efficiencies - required_efficiencies
     violations = torch.cat(
         (
             (event_fpr - objective_config.target_event_fpr).reshape(1),
-            -deficits - deltas,
+            -region_margins,
         )
     )
     return SoftConstraintMetrics(
@@ -280,6 +343,9 @@ def calculate_soft_constraint_metrics(
         region_deltas=deltas,
         violations=violations,
         valid_regions=valid_regions,
+        reference_efficiencies=reference_efficiencies,
+        required_efficiencies=required_efficiencies,
+        region_margins=region_margins,
     )
 
 
@@ -302,6 +368,8 @@ def calculate_hard_constraint_metrics(
     objective_config,
     calibration=None,
     baseline_threshold_gev=None,
+    reference_scores=None,
+    reference_calibration=None,
 ):
     """Measure the exact deployable objective for validation and audits."""
     scored = frame.copy()
@@ -323,6 +391,24 @@ def calculate_hard_constraint_metrics(
 
     signal_pass = classifier_object_pass_mask(signal, calibration)
     baseline_pass = tob_pt_gev(signal) >= baseline_threshold_gev
+    reference_pass = None
+    if objective_config.reference_model_allowed_deficits is not None:
+        if reference_scores is None:
+            raise ValueError("Reference-model guards require reference scores")
+        reference_scored = frame.copy()
+        reference_scored["nn_score"] = np.asarray(reference_scores, dtype=np.float64)
+        reference_background = select_background_objects(reference_scored)
+        reference_signal = select_truth_tau_objects(reference_scored)
+        if reference_calibration is None:
+            reference_calibration = calibrate_classifier(
+                reference_background,
+                reference_background["nn_score"].to_numpy(dtype=np.float64),
+                classifier_config,
+            )
+        reference_pass = classifier_object_pass_mask(
+            reference_signal,
+            reference_calibration,
+        )
     truth_pt = signal["truth_pt"].to_numpy(dtype=np.float64)
     finite = truth_pt[np.isfinite(truth_pt) & (truth_pt > 0.0)]
     if finite.size and np.median(finite) > 1000.0:
@@ -330,6 +416,8 @@ def calculate_hard_constraint_metrics(
 
     efficiencies = []
     baseline_efficiencies = []
+    reference_efficiencies = []
+    required_efficiencies = []
     deltas = []
     counts = []
     for low, high in objective_config.regions_gev:
@@ -338,12 +426,31 @@ def calculate_hard_constraint_metrics(
         if not np.any(in_region):
             efficiencies.append(None)
             baseline_efficiencies.append(None)
+            reference_efficiencies.append(None)
+            required_efficiencies.append(None)
             deltas.append(None)
             continue
         efficiency = float(signal_pass[in_region].mean())
         baseline_efficiency = float(baseline_pass[in_region].mean())
         efficiencies.append(efficiency)
         baseline_efficiencies.append(baseline_efficiency)
+        reference_efficiency = (
+            None if reference_pass is None else float(reference_pass[in_region].mean())
+        )
+        reference_efficiencies.append(reference_efficiency)
+        required = baseline_efficiency + objective_config.minimum_region_advantages[
+            len(efficiencies) - 1
+        ]
+        if reference_efficiency is not None:
+            required = max(
+                required,
+                reference_efficiency
+                - objective_config.reference_model_allowed_deficits[
+                    len(efficiencies) - 1
+                ],
+            )
+        required = min(required, 1.0)
+        required_efficiencies.append(required)
         deltas.append(efficiency - baseline_efficiency)
 
     valid = np.asarray([value is not None for value in deltas])
@@ -355,8 +462,13 @@ def calculate_hard_constraint_metrics(
     weights = weights * valid
     weights = weights / weights.sum() if weights.sum() else weights
     objective = float(np.sum(weights * delta_values))
-    deficits = np.asarray(objective_config.allowed_deficits, dtype=np.float64)
-    margins = delta_values + deficits
+    margins = np.asarray(
+        [
+            0.0 if required is None else efficiency - required
+            for efficiency, required in zip(efficiencies, required_efficiencies)
+        ],
+        dtype=np.float64,
+    )
 
     event_pass = classifier_event_pass_mask(background, calibration)
     achieved_fpr = float(event_pass.mean())
@@ -365,6 +477,8 @@ def calculate_hard_constraint_metrics(
         "achieved_fpr": achieved_fpr,
         "region_efficiencies": efficiencies,
         "baseline_efficiencies": baseline_efficiencies,
+        "reference_efficiencies": reference_efficiencies,
+        "required_efficiencies": required_efficiencies,
         "region_deltas": deltas,
         "region_counts": counts,
         "constraint_margins": margins.tolist(),

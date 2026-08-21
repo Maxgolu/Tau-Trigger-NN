@@ -95,6 +95,66 @@ class ConstrainedObjectiveTests(unittest.TestCase):
         (-metrics.objective + metrics.violations.sum()).backward()
         self.assertIsNotNone(probabilities.grad)
 
+    def test_reference_guard_uses_the_stricter_efficiency_floor(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "regions_gev": [[25, 120]],
+                    "region_weights": [1.0],
+                    "allowed_deficits": [0.005],
+                    "minimum_region_advantages": [0.0025],
+                    "reference_model_allowed_deficits": [0.005],
+                }
+            }
+        )
+        probabilities = torch.tensor([[0.80, 0.70]], requires_grad=True)
+        reference = torch.tensor([[0.90, 0.80]])
+        object_mask = torch.ones_like(probabilities, dtype=torch.bool)
+        signal_mask = torch.ones_like(probabilities, dtype=torch.bool)
+        background_mask = torch.tensor([True])
+        truth_pt = torch.tensor([[30.0, 50.0]])
+        baseline = torch.tensor([[True, False]])
+        metrics = calculate_soft_constraint_metrics(
+            probabilities,
+            object_mask,
+            signal_mask,
+            background_mask,
+            truth_pt,
+            baseline,
+            config,
+            reference_object_pass_probabilities=reference,
+        )
+        # Baseline + 0.0025 is 0.5025; reference - 0.005 is 0.845.
+        self.assertAlmostEqual(float(metrics.required_efficiencies[0]), 0.845)
+        self.assertAlmostEqual(float(metrics.region_margins[0].detach()), -0.095)
+        self.assertAlmostEqual(float(metrics.violations[1].detach()), 0.095)
+
+    def test_positive_baseline_margin_is_capped_at_unit_efficiency(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "regions_gev": [[60, 120]],
+                    "region_weights": [1.0],
+                    "minimum_region_advantages": [0.0025],
+                }
+            }
+        )
+        probabilities = torch.tensor([[1.0, 1.0]], requires_grad=True)
+        mask = torch.ones_like(probabilities, dtype=torch.bool)
+        metrics = calculate_soft_constraint_metrics(
+            probabilities,
+            mask,
+            mask,
+            torch.tensor([True]),
+            torch.tensor([[80.0, 90.0]]),
+            torch.tensor([[True, True]]),
+            config,
+        )
+        self.assertEqual(float(metrics.required_efficiencies[0]), 1.0)
+        self.assertEqual(float(metrics.region_margins[0].detach()), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

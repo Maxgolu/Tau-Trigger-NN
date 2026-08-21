@@ -251,6 +251,26 @@ def parse_args():
         help="Training batches used for robust gradient balancing (default: 8).",
     )
     parser.add_argument(
+        "--constrained-max-multiplier",
+        type=float,
+        default=10.0,
+        help="Projection ceiling for constrained multipliers (default: 10).",
+    )
+    parser.add_argument(
+        "--constrained-minimum-region-advantages",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Minimum efficiency advantage over the baseline for each region.",
+    )
+    parser.add_argument(
+        "--constrained-reference-model-deficits",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Maximum efficiency loss from the pretrained model in each region.",
+    )
+    parser.add_argument(
         "--constrained-event-batch-size",
         type=int,
         default=512,
@@ -584,6 +604,21 @@ if __name__ == "__main__":
                         "Each --constrained-region must be LOW,HIGH,WEIGHT,DEFICIT"
                     ) from error
                 parsed_regions.append((low, high, weight, deficit))
+            region_count = len(parsed_regions)
+            for values, option in (
+                (
+                    args.constrained_minimum_region_advantages,
+                    "--constrained-minimum-region-advantages",
+                ),
+                (
+                    args.constrained_reference_model_deficits,
+                    "--constrained-reference-model-deficits",
+                ),
+            ):
+                if values is not None and len(values) != region_count:
+                    raise ValueError(
+                        f"{option} requires one value for each constrained region"
+                    )
             loss_variants = [
                 {
                     "name": "constrained_trigger",
@@ -604,9 +639,19 @@ if __name__ == "__main__":
                     "gradient_balance_batches": (
                         args.constrained_gradient_balance_batches
                     ),
+                    "max_multiplier": args.constrained_max_multiplier,
                     "event_batch_size": args.constrained_event_batch_size,
                 }
             ]
+            constrained_loss = loss_variants[0]
+            if args.constrained_minimum_region_advantages is not None:
+                constrained_loss["minimum_region_advantages"] = (
+                    args.constrained_minimum_region_advantages
+                )
+            if args.constrained_reference_model_deficits is not None:
+                constrained_loss["reference_model_allowed_deficits"] = (
+                    args.constrained_reference_model_deficits
+                )
             initialization = {
                 "mode": "pretrained",
                 "weights_path": args.constrained_initial_weights,

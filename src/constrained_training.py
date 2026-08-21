@@ -61,6 +61,52 @@ def parameter_gradient_norm(value, parameters, retain_graph=True):
     return torch.sqrt(squared_norm)
 
 
+def parameter_gradient_pair_statistics(
+    first_value,
+    second_value,
+    parameters,
+    retain_graph=True,
+):
+    """Measure two gradient scales and their cosine without populating .grad."""
+    parameters = tuple(parameters)
+    first_gradients = torch.autograd.grad(
+        first_value,
+        parameters,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    second_gradients = torch.autograd.grad(
+        second_value,
+        parameters,
+        retain_graph=retain_graph,
+        allow_unused=True,
+    )
+    first_squared = first_value.new_zeros(())
+    second_squared = first_value.new_zeros(())
+    dot_product = first_value.new_zeros(())
+    for first_gradient, second_gradient in zip(
+        first_gradients,
+        second_gradients,
+    ):
+        if first_gradient is not None:
+            first_squared = first_squared + torch.sum(first_gradient.detach() ** 2)
+        if second_gradient is not None:
+            second_squared = second_squared + torch.sum(second_gradient.detach() ** 2)
+        if first_gradient is not None and second_gradient is not None:
+            dot_product = dot_product + torch.sum(
+                first_gradient.detach() * second_gradient.detach()
+            )
+    first_norm = torch.sqrt(first_squared)
+    second_norm = torch.sqrt(second_squared)
+    denominator = first_norm * second_norm
+    cosine = torch.where(
+        denominator > 0.0,
+        dot_product / denominator,
+        dot_product.new_zeros(()),
+    )
+    return first_norm, second_norm, cosine
+
+
 def _soft_batch_metrics(
     model,
     batch,
@@ -69,6 +115,7 @@ def _soft_batch_metrics(
     fixed_nn_threshold,
     fixed_tob_threshold,
     baseline_threshold_gev,
+    reference_model=None,
 ):
     """Build the differentiable objective for one complete-event batch."""
     scores = _event_model_scores(model, batch)
@@ -81,6 +128,18 @@ def _soft_batch_metrics(
         fixed_tob_threshold,
     )
     baseline_pass = batch.tob_pt_gev >= baseline_threshold_gev
+    reference_pass_probabilities = None
+    if reference_model is not None:
+        with torch.no_grad():
+            reference_scores = _event_model_scores(reference_model, batch)
+            reference_pass_probabilities = soft_object_pass(
+                reference_scores,
+                fixed_nn_threshold,
+                objective_config.temperature,
+                classifier_config.name,
+                batch.tob_pt_gev,
+                fixed_tob_threshold,
+            )
     metrics = calculate_soft_constraint_metrics(
         pass_probabilities,
         batch.object_mask,
@@ -89,6 +148,7 @@ def _soft_batch_metrics(
         batch.truth_pt_gev,
         baseline_pass,
         objective_config,
+        reference_object_pass_probabilities=reference_pass_probabilities,
     )
     return scores, metrics
 
@@ -101,6 +161,7 @@ def initialize_fpr_multiplier_from_gradients(
     fixed_nn_threshold,
     fixed_tob_threshold,
     baseline_threshold_gev,
+    reference_model=None,
 ):
     """Balance initial objective and FPR gradient scales on training batches."""
     parameters = tuple(
@@ -119,13 +180,10 @@ def initialize_fpr_multiplier_from_gradients(
             fixed_nn_threshold,
             fixed_tob_threshold,
             baseline_threshold_gev,
+            reference_model=reference_model,
         )
-        objective_norm = parameter_gradient_norm(
+        objective_norm, fpr_norm, cosine = parameter_gradient_pair_statistics(
             metrics.objective,
-            parameters,
-            retain_graph=True,
-        )
-        fpr_norm = parameter_gradient_norm(
             metrics.event_fpr,
             parameters,
             retain_graph=False,
@@ -142,6 +200,7 @@ def initialize_fpr_multiplier_from_gradients(
                     "soft_event_fpr": float(metrics.event_fpr.detach().cpu()),
                     "objective_gradient_norm": objective_value,
                     "fpr_gradient_norm": fpr_value,
+                    "gradient_cosine_similarity": float(cosine.detach().cpu()),
                     "ratio": float(ratio),
                 }
             )
@@ -244,10 +303,9 @@ def _resolve_initial_weights(config, project_root):
 
 
 def _hard_violations(hard_metrics, objective_config, device):
-    deltas = hard_metrics["region_deltas"]
     region_violations = [
-        0.0 if delta is None else -deficit - delta
-        for deficit, delta in zip(objective_config.allowed_deficits, deltas)
+        0.0 if margin is None else -margin
+        for margin in hard_metrics["constraint_margins"]
     ]
     return torch.tensor(
         [
@@ -354,6 +412,11 @@ def run_constrained_training_pipeline(
         # Older PyTorch releases do not expose the safe weights_only argument.
         initial_state = torch.load(weights_path, map_location=device)
     model.load_state_dict(initial_state)
+    reference_model = None
+    if objective_config.reference_model_allowed_deficits is not None:
+        reference_model = copy.deepcopy(model).eval()
+        for parameter in reference_model.parameters():
+            parameter.requires_grad_(False)
     print(f"Loaded constrained initialization: {weights_path}")
 
     object_batch_size = int(config.get("batch_size", 256))
@@ -363,6 +426,7 @@ def run_constrained_training_pipeline(
         object_batch_size,
         device,
     )
+    reference_constraint_scores = constraint_scores.copy()
     constraint_frame = train_frame.iloc[constraint_rows].copy().reset_index(drop=True)
     background = select_background_objects(constraint_frame)
     background_positions = constraint_frame.index[
@@ -419,6 +483,7 @@ def run_constrained_training_pipeline(
             fixed_nn_threshold,
             fixed_tob_threshold,
             baseline_threshold_gev,
+            reference_model=reference_model,
         )
     )
     print(
@@ -450,6 +515,8 @@ def run_constrained_training_pipeline(
         objective_config,
         calibration=calibration,
         baseline_threshold_gev=baseline_threshold_gev,
+        reference_scores=constraint_scores,
+        reference_calibration=calibration,
     )
     initial_validation_scores = _predict_numpy(
         model,
@@ -462,6 +529,7 @@ def run_constrained_training_pipeline(
         initial_validation_scores,
         classifier_config,
         objective_config,
+        reference_scores=initial_validation_scores,
     )
     history.append(
         {
@@ -510,6 +578,7 @@ def run_constrained_training_pipeline(
                 fixed_nn_threshold,
                 fixed_tob_threshold,
                 baseline_threshold_gev,
+                reference_model=reference_model,
             )
             if epoch_gradient_norms is None:
                 parameters = tuple(
@@ -517,15 +586,13 @@ def run_constrained_training_pipeline(
                     for parameter in model.parameters()
                     if parameter.requires_grad
                 )
-                objective_norm = parameter_gradient_norm(
-                    metrics.objective,
-                    parameters,
-                    retain_graph=True,
-                )
-                fpr_norm = parameter_gradient_norm(
-                    metrics.event_fpr,
-                    parameters,
-                    retain_graph=True,
+                objective_norm, fpr_norm, gradient_cosine = (
+                    parameter_gradient_pair_statistics(
+                        metrics.objective,
+                        metrics.event_fpr,
+                        parameters,
+                        retain_graph=True,
+                    )
                 )
                 epoch_gradient_norms = {
                     "objective": float(objective_norm.detach().cpu()),
@@ -533,6 +600,9 @@ def run_constrained_training_pipeline(
                     "weighted_event_fpr": float(
                         dual_state.multipliers[0].detach().cpu()
                         * fpr_norm.detach().cpu()
+                    ),
+                    "cosine_similarity": float(
+                        gradient_cosine.detach().cpu()
                     ),
                 }
             loss = constrained_primal_loss(metrics, dual_state)
@@ -560,6 +630,8 @@ def run_constrained_training_pipeline(
             objective_config,
             calibration=calibration,
             baseline_threshold_gev=baseline_threshold_gev,
+            reference_scores=reference_constraint_scores,
+            reference_calibration=calibration,
         )
         hard_violations = _hard_violations(
             hard_constraint,
@@ -588,6 +660,7 @@ def run_constrained_training_pipeline(
             validation_scores,
             classifier_config,
             objective_config,
+            reference_scores=initial_validation_scores,
         )
         record = {
             "epoch": epoch + 1,
