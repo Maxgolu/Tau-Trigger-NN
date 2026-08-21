@@ -14,6 +14,7 @@ from constrained_objective import (
 from constrained_training import (
     DualState,
     _is_better_hard_candidate,
+    constraint_resolution_warnings,
     constrained_primal_loss,
     initialize_fpr_multiplier_from_gradients,
     parameter_gradient_pair_statistics,
@@ -33,6 +34,28 @@ class ConstrainedTrainingTests(unittest.TestCase):
             maximum=3.0,
         )
         self.assertTrue(torch.equal(state.multipliers, torch.tensor([0.0, 1.2, 3.0])))
+
+    def test_dual_update_uses_separate_constraint_rates(self):
+        state = DualState(torch.zeros(3))
+        update_dual_state(
+            state,
+            torch.tensor([0.1, 0.1, -0.1]),
+            learning_rate=1.0,
+            region_learning_rate=10.0,
+            maximum=3.0,
+        )
+        self.assertTrue(torch.equal(state.multipliers, torch.tensor([0.1, 1.0, 0.0])))
+
+    def test_resolution_warning_detects_sub_object_slack(self):
+        messages = constraint_resolution_warnings(
+            {
+                "constraint_margins": [0.0001, 0.01],
+                "region_efficiency_resolutions": [0.0005, 0.001],
+            },
+            ((25.0, 40.0), (60.0, 120.0)),
+        )
+        self.assertEqual(len(messages), 1)
+        self.assertIn("below one-object resolution", messages[0])
 
     def test_primal_loss_uses_detached_dual_prices(self):
         objective = torch.tensor(0.3, requires_grad=True)

@@ -227,7 +227,22 @@ def parse_args():
         "--constrained-dual-learning-rate",
         type=float,
         default=1.0,
-        help="Projected dual-ascent learning rate (default: 1).",
+        help=(
+            "Legacy projected dual-ascent rate used for both constraint types "
+            "unless a separate rate is provided (default: 1)."
+        ),
+    )
+    parser.add_argument(
+        "--constrained-fpr-dual-learning-rate",
+        type=float,
+        default=None,
+        help="Optional projected dual-ascent rate for the event-FPR price.",
+    )
+    parser.add_argument(
+        "--constrained-region-dual-learning-rate",
+        type=float,
+        default=None,
+        help="Optional projected dual-ascent rate for energy-region prices.",
     )
     parser.add_argument(
         "--constrained-initial-fpr-multiplier-mode",
@@ -631,7 +646,16 @@ if __name__ == "__main__":
                     "region_weights": [region[2] for region in parsed_regions],
                     "allowed_deficits": [region[3] for region in parsed_regions],
                     "constraint_fraction": args.constrained_constraint_fraction,
-                    "dual_learning_rate": args.constrained_dual_learning_rate,
+                    "fpr_dual_learning_rate": (
+                        args.constrained_dual_learning_rate
+                        if args.constrained_fpr_dual_learning_rate is None
+                        else args.constrained_fpr_dual_learning_rate
+                    ),
+                    "region_dual_learning_rate": (
+                        args.constrained_dual_learning_rate
+                        if args.constrained_region_dual_learning_rate is None
+                        else args.constrained_region_dual_learning_rate
+                    ),
                     "initial_fpr_multiplier_mode": (
                         args.constrained_initial_fpr_multiplier_mode
                     ),

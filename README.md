@@ -224,7 +224,8 @@ configs are under `configs/constrained_stage_d_nn_s42/` and
 `configs/constrained_stage_e_or_s42/`. The gradient-balanced NN-only follow-up
 is under `configs/constrained_stage_d2_nn_gradbalance_s42/`. The controlled
 multiplier and reference-guard comparison is under
-`configs/constrained_stage_d3_nn_s42/`.
+`configs/constrained_stage_d3_nn_s42/`. The corrected saturation guard and
+faster energy-price response are under `configs/constrained_stage_d4_nn_s42/`.
 
 The event-FPR multiplier can use the legacy fixed initialization or
 `initial_fpr_multiplier_mode: "gradient_balance"`. Gradient balancing measures
@@ -234,6 +235,12 @@ and hard metrics, gradient scales, their cosine similarity, and
 signal/background score quantiles. The best checkpoint remains the primary
 output, while `last_epoch_weights.pt` is saved only for debugging failed or
 unstable training.
+
+The event-FPR and energy-region prices can use separate ascent rates through
+`fpr_dual_learning_rate` and `region_dual_learning_rate`. The legacy
+`dual_learning_rate` still sets both values when the separate fields are
+omitted. Training also reports an initial warning when an efficiency guard has
+less slack than one observed signal object in its region.
 
 Energy guards can also protect the pretrained model. For region `k`, the
 required efficiency is the larger of `baseline + minimum_region_advantages[k]`
@@ -259,7 +266,9 @@ hyperparameters. New constrained configs can also be generated with
 `--constrained-*` options. Reference guards can be generated with
 `--constrained-minimum-region-advantages` and
 `--constrained-reference-model-deficits`; the multiplier ceiling is controlled
-by `--constrained-max-multiplier`.
+by `--constrained-max-multiplier`. Separate dual rates can be generated with
+`--constrained-fpr-dual-learning-rate` and
+`--constrained-region-dual-learning-rate`.
 
 ### Step 2: Train the Network
 Main training script. 

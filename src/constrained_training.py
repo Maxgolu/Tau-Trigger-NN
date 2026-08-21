@@ -249,10 +249,43 @@ def _score_quantiles(frame, scores):
 
 
 @torch.no_grad()
-def update_dual_state(dual_state, hard_violations, learning_rate, maximum):
-    """Ascend on measured violations and project prices to a finite interval."""
-    dual_state.multipliers.add_(learning_rate * hard_violations)
+def update_dual_state(
+    dual_state,
+    hard_violations,
+    learning_rate,
+    maximum,
+    region_learning_rate=None,
+):
+    """Ascend with separate FPR and energy-region response rates."""
+    if region_learning_rate is None:
+        region_learning_rate = learning_rate
+    rates = torch.full_like(hard_violations, float(region_learning_rate))
+    rates[0] = float(learning_rate)
+    dual_state.multipliers.add_(rates * hard_violations)
     dual_state.multipliers.clamp_(min=0.0, max=maximum)
+
+
+def constraint_resolution_warnings(metrics, regions):
+    """Describe initial guards whose slack is below one observed object."""
+    messages = []
+    margins = metrics.get("constraint_margins", [])
+    resolutions = metrics.get("region_efficiency_resolutions", [])
+    for index, ((low, high), margin, resolution) in enumerate(
+        zip(regions, margins, resolutions)
+    ):
+        if margin is None or resolution is None:
+            continue
+        if margin < 0.0:
+            messages.append(
+                f"region {index} [{low:g}, {high:g}) GeV starts infeasible "
+                f"by {-margin:.6f}"
+            )
+        elif margin < resolution:
+            messages.append(
+                f"region {index} [{low:g}, {high:g}) GeV has initial slack "
+                f"{margin:.6f}, below one-object resolution {resolution:.6f}"
+            )
+    return messages
 
 
 def _predict_numpy(model, features, batch_size, device):
@@ -531,6 +564,19 @@ def run_constrained_training_pipeline(
         objective_config,
         reference_scores=initial_validation_scores,
     )
+    initial_resolution_warnings = {
+        "constraint_training": constraint_resolution_warnings(
+            initial_constraint,
+            objective_config.regions_gev,
+        ),
+        "validation": constraint_resolution_warnings(
+            initial_validation,
+            objective_config.regions_gev,
+        ),
+    }
+    for split_name, messages in initial_resolution_warnings.items():
+        for message in messages:
+            print(f"Constraint resolution warning ({split_name}): {message}")
     history.append(
         {
             "epoch": 0,
@@ -541,6 +587,7 @@ def run_constrained_training_pipeline(
             "validation": initial_validation,
             "diagnostics": {
                 "gradient_initialization": gradient_initialization,
+                "constraint_resolution_warnings": initial_resolution_warnings,
                 "score_quantiles": _score_quantiles(
                     constraint_frame,
                     constraint_scores,
@@ -645,8 +692,11 @@ def run_constrained_training_pipeline(
             update_dual_state(
                 dual_state,
                 hard_violations,
-                objective_config.dual_learning_rate,
+                objective_config.fpr_dual_learning_rate,
                 objective_config.max_multiplier,
+                region_learning_rate=(
+                    objective_config.region_dual_learning_rate
+                ),
             )
 
         validation_scores = _predict_numpy(
@@ -737,6 +787,9 @@ def run_constrained_training_pipeline(
             "fixed_training_calibration": calibration,
             "baseline_threshold_gev": baseline_threshold_gev,
             "gradient_initialization": gradient_initialization,
+            "initial_constraint_resolution_warnings": (
+                initial_resolution_warnings
+            ),
             "best_validation_record": best_record,
             "history": history,
             "artifacts": {

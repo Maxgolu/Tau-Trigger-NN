@@ -32,7 +32,8 @@ class ConstrainedObjectiveConfig:
     minimum_region_advantages: tuple[float, ...]
     reference_model_allowed_deficits: tuple[float, ...] | None
     constraint_fraction: float
-    dual_learning_rate: float
+    fpr_dual_learning_rate: float
+    region_dual_learning_rate: float
     dual_update_frequency: int
     dual_warmup_epochs: int
     initial_fpr_multiplier_mode: str
@@ -58,7 +59,8 @@ class ConstrainedObjectiveConfig:
                 else list(self.reference_model_allowed_deficits)
             ),
             "constraint_fraction": self.constraint_fraction,
-            "dual_learning_rate": self.dual_learning_rate,
+            "fpr_dual_learning_rate": self.fpr_dual_learning_rate,
+            "region_dual_learning_rate": self.region_dual_learning_rate,
             "dual_update_frequency": self.dual_update_frequency,
             "dual_warmup_epochs": self.dual_warmup_epochs,
             "initial_fpr_multiplier_mode": self.initial_fpr_multiplier_mode,
@@ -145,6 +147,7 @@ def parse_constrained_objective(config):
     ):
         raise ValueError("Reference-model allowed deficits must be non-negative")
 
+    legacy_dual_learning_rate = float(raw.get("dual_learning_rate", 1.0))
     result = ConstrainedObjectiveConfig(
         temperature=float(raw.get("temperature", 0.02)),
         target_event_fpr=float(raw.get("target_event_fpr", 0.005)),
@@ -155,7 +158,12 @@ def parse_constrained_objective(config):
         minimum_region_advantages=advantages,
         reference_model_allowed_deficits=reference_deficits,
         constraint_fraction=float(raw.get("constraint_fraction", 0.3)),
-        dual_learning_rate=float(raw.get("dual_learning_rate", 1.0)),
+        fpr_dual_learning_rate=float(
+            raw.get("fpr_dual_learning_rate", legacy_dual_learning_rate)
+        ),
+        region_dual_learning_rate=float(
+            raw.get("region_dual_learning_rate", legacy_dual_learning_rate)
+        ),
         dual_update_frequency=int(raw.get("dual_update_frequency", 1)),
         dual_warmup_epochs=int(raw.get("dual_warmup_epochs", 0)),
         initial_fpr_multiplier_mode=str(
@@ -176,8 +184,11 @@ def parse_constrained_objective(config):
         raise ValueError("Constrained trigger_objects must be positive")
     if not 0.0 < result.constraint_fraction < 1.0:
         raise ValueError("constraint_fraction must be in (0, 1)")
-    if result.dual_learning_rate <= 0.0:
-        raise ValueError("dual_learning_rate must be positive")
+    if (
+        result.fpr_dual_learning_rate <= 0.0
+        or result.region_dual_learning_rate <= 0.0
+    ):
+        raise ValueError("Constrained dual learning rates must be positive")
     if result.dual_update_frequency < 1 or result.dual_warmup_epochs < 0:
         raise ValueError("Invalid constrained dual update schedule")
     if result.initial_fpr_multiplier_mode not in {"fixed", "gradient_balance"}:
@@ -469,6 +480,11 @@ def calculate_hard_constraint_metrics(
         ],
         dtype=np.float64,
     )
+    resolutions = [None if count < 1 else 1.0 / count for count in counts]
+    margin_in_objects = [
+        None if resolution is None else float(margin / resolution)
+        for margin, resolution in zip(margins, resolutions)
+    ]
 
     event_pass = classifier_event_pass_mask(background, calibration)
     achieved_fpr = float(event_pass.mean())
@@ -481,7 +497,9 @@ def calculate_hard_constraint_metrics(
         "required_efficiencies": required_efficiencies,
         "region_deltas": deltas,
         "region_counts": counts,
+        "region_efficiency_resolutions": resolutions,
         "constraint_margins": margins.tolist(),
+        "constraint_margins_in_objects": margin_in_objects,
         "constraints_satisfied": bool(
             achieved_fpr <= objective_config.target_event_fpr + 1e-12
             and np.all(margins[valid] >= 0.0)

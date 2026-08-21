@@ -155,6 +155,31 @@ class ConstrainedObjectiveTests(unittest.TestCase):
         self.assertEqual(float(metrics.required_efficiencies[0]), 1.0)
         self.assertEqual(float(metrics.region_margins[0].detach()), 0.0)
 
+    def test_separate_dual_rates_fall_back_to_legacy_rate(self):
+        legacy = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "dual_learning_rate": 3.0,
+                }
+            }
+        )
+        self.assertEqual(legacy.fpr_dual_learning_rate, 3.0)
+        self.assertEqual(legacy.region_dual_learning_rate, 3.0)
+
+        separate = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "dual_learning_rate": 3.0,
+                    "fpr_dual_learning_rate": 1.0,
+                    "region_dual_learning_rate": 50.0,
+                }
+            }
+        )
+        self.assertEqual(separate.fpr_dual_learning_rate, 1.0)
+        self.assertEqual(separate.region_dual_learning_rate, 50.0)
+
 
 if __name__ == "__main__":
     unittest.main()
