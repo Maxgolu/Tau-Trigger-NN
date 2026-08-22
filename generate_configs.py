@@ -208,6 +208,44 @@ def parse_args():
         help="Smooth trigger temperature (default: 0.02 after surrogate audit).",
     )
     parser.add_argument(
+        "--constrained-temperature-start",
+        type=float,
+        default=None,
+        help="Optional starting temperature for continuation training.",
+    )
+    parser.add_argument(
+        "--constrained-temperature-schedule",
+        choices=["constant", "linear", "cosine"],
+        default="constant",
+        help="Temperature schedule used by constrained proxy cuts.",
+    )
+    parser.add_argument(
+        "--constrained-primal-objective",
+        choices=["soft_efficiency", "tail_ranking"],
+        default="soft_efficiency",
+        help="Differentiable primal objective (default: soft_efficiency).",
+    )
+    parser.add_argument(
+        "--constrained-proxy-threshold-mode",
+        choices=["fixed", "batch_rank"],
+        default="fixed",
+        help="Use a fixed legacy cut or a shift-invariant batch-rank proxy cut.",
+    )
+    parser.add_argument(
+        "--constrained-objective-region",
+        action="append",
+        default=None,
+        metavar="LOW,HIGH,WEIGHT",
+        help="Objective-only truth-pT region. Repeat for multiple regions.",
+    )
+    parser.add_argument(
+        "--constrained-constraint-region",
+        action="append",
+        default=None,
+        metavar="LOW,HIGH,DEFICIT",
+        help="Protected truth-pT region. Repeat for multiple regions.",
+    )
+    parser.add_argument(
         "--constrained-region",
         action="append",
         default=None,
@@ -290,6 +328,16 @@ def parse_args():
         type=int,
         default=512,
         help="Complete events per primal update (default: 512).",
+    )
+    parser.add_argument("--constrained-tail-fraction", type=float, default=0.05)
+    parser.add_argument("--constrained-tail-temperature", type=float, default=0.2)
+    parser.add_argument("--constrained-tail-min-events", type=int, default=16)
+    parser.add_argument("--constrained-tail-memory-bank-size", type=int, default=0)
+    parser.add_argument(
+        "--constrained-fpr-violation-scale",
+        type=float,
+        default=1.0,
+        help="Scale applied consistently to soft and hard FPR violations.",
     )
     parser.add_argument(
         "--loss-alpha",
@@ -619,7 +667,37 @@ if __name__ == "__main__":
                         "Each --constrained-region must be LOW,HIGH,WEIGHT,DEFICIT"
                     ) from error
                 parsed_regions.append((low, high, weight, deficit))
-            region_count = len(parsed_regions)
+            objective_regions = [
+                (region[0], region[1], region[2]) for region in parsed_regions
+            ]
+            if args.constrained_objective_region:
+                objective_regions = []
+                for raw_region in args.constrained_objective_region:
+                    try:
+                        low, high, weight = (
+                            float(value.strip()) for value in raw_region.split(",")
+                        )
+                    except ValueError as error:
+                        raise ValueError(
+                            "Each --constrained-objective-region must be LOW,HIGH,WEIGHT"
+                        ) from error
+                    objective_regions.append((low, high, weight))
+            constraint_regions = [
+                (region[0], region[1], region[3]) for region in parsed_regions
+            ]
+            if args.constrained_constraint_region:
+                constraint_regions = []
+                for raw_region in args.constrained_constraint_region:
+                    try:
+                        low, high, deficit = (
+                            float(value.strip()) for value in raw_region.split(",")
+                        )
+                    except ValueError as error:
+                        raise ValueError(
+                            "Each --constrained-constraint-region must be LOW,HIGH,DEFICIT"
+                        ) from error
+                    constraint_regions.append((low, high, deficit))
+            region_count = len(constraint_regions)
             for values, option in (
                 (
                     args.constrained_minimum_region_advantages,
@@ -637,15 +715,38 @@ if __name__ == "__main__":
             loss_variants = [
                 {
                     "name": "constrained_trigger",
-                    "temperature": args.constrained_temperature,
+                    "temperature_start": (
+                        args.constrained_temperature
+                        if args.constrained_temperature_start is None
+                        else args.constrained_temperature_start
+                    ),
+                    "temperature_end": args.constrained_temperature,
+                    "temperature_schedule": args.constrained_temperature_schedule,
                     "target_event_fpr": args.classifier_target_fpr,
                     "trigger_objects": 2,
-                    "regions_gev": [
-                        [region[0], region[1]] for region in parsed_regions
+                    "primal_objective": args.constrained_primal_objective,
+                    "proxy_threshold_mode": (
+                        args.constrained_proxy_threshold_mode
+                    ),
+                    "objective_regions_gev": [
+                        [region[0], region[1]] for region in objective_regions
                     ],
-                    "region_weights": [region[2] for region in parsed_regions],
-                    "allowed_deficits": [region[3] for region in parsed_regions],
+                    "objective_region_weights": [
+                        region[2] for region in objective_regions
+                    ],
+                    "constraint_regions_gev": [
+                        [region[0], region[1]] for region in constraint_regions
+                    ],
+                    "allowed_deficits": [region[2] for region in constraint_regions],
+                    "tail_fraction": args.constrained_tail_fraction,
+                    "tail_temperature": args.constrained_tail_temperature,
+                    "tail_min_events": args.constrained_tail_min_events,
+                    "tail_memory_bank_size": (
+                        args.constrained_tail_memory_bank_size
+                    ),
                     "constraint_fraction": args.constrained_constraint_fraction,
+                    "crossfit_folds": 2,
+                    "fpr_violation_scale": args.constrained_fpr_violation_scale,
                     "fpr_dual_learning_rate": (
                         args.constrained_dual_learning_rate
                         if args.constrained_fpr_dual_learning_rate is None

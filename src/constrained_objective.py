@@ -1,9 +1,11 @@
 """Differentiable trigger objectives shared by NN-only and OR training."""
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from classifiers import (
     calibrate_classifier,
@@ -23,15 +25,26 @@ from operating_point import (
 class ConstrainedObjectiveConfig:
     """Physics targets and optimizer settings for constrained fine-tuning."""
 
-    temperature: float
+    temperature_start: float
+    temperature_end: float
+    temperature_schedule: str
     target_event_fpr: float
     trigger_objects: int
-    regions_gev: tuple[tuple[float, float], ...]
-    region_weights: tuple[float, ...]
+    primal_objective: str
+    proxy_threshold_mode: str
+    objective_regions_gev: tuple[tuple[float, float], ...]
+    objective_region_weights: tuple[float, ...]
+    constraint_regions_gev: tuple[tuple[float, float], ...]
     allowed_deficits: tuple[float, ...]
     minimum_region_advantages: tuple[float, ...]
     reference_model_allowed_deficits: tuple[float, ...] | None
+    tail_fraction: float
+    tail_temperature: float
+    tail_min_events: int
+    tail_memory_bank_size: int
     constraint_fraction: float
+    crossfit_folds: int
+    fpr_violation_scale: float
     fpr_dual_learning_rate: float
     region_dual_learning_rate: float
     dual_update_frequency: int
@@ -44,13 +57,48 @@ class ConstrainedObjectiveConfig:
     gradient_balance_batches: int
     gradient_balance_epsilon: float
 
+    @property
+    def temperature(self):
+        """Backward-compatible final surrogate temperature."""
+        return self.temperature_end
+
+    @property
+    def regions_gev(self):
+        """Backward-compatible name for protected regions."""
+        return self.constraint_regions_gev
+
+    @property
+    def region_weights(self):
+        """Backward-compatible name for objective-only weights."""
+        return self.objective_region_weights
+
+    def temperature_at(self, epoch_index, epoch_count):
+        """Return the configured continuation temperature for one epoch."""
+        if epoch_count <= 1 or self.temperature_schedule == "constant":
+            return self.temperature_end
+        fraction = min(max(float(epoch_index) / float(epoch_count - 1), 0.0), 1.0)
+        if self.temperature_schedule == "cosine":
+            fraction = 0.5 * (1.0 - math.cos(math.pi * fraction))
+        return self.temperature_start + fraction * (
+            self.temperature_end - self.temperature_start
+        )
+
     def to_dict(self):
         return {
-            "temperature": self.temperature,
+            "temperature_start": self.temperature_start,
+            "temperature_end": self.temperature_end,
+            "temperature_schedule": self.temperature_schedule,
             "target_event_fpr": self.target_event_fpr,
             "trigger_objects": self.trigger_objects,
-            "regions_gev": [list(region) for region in self.regions_gev],
-            "region_weights": list(self.region_weights),
+            "primal_objective": self.primal_objective,
+            "proxy_threshold_mode": self.proxy_threshold_mode,
+            "objective_regions_gev": [
+                list(region) for region in self.objective_regions_gev
+            ],
+            "objective_region_weights": list(self.objective_region_weights),
+            "constraint_regions_gev": [
+                list(region) for region in self.constraint_regions_gev
+            ],
             "allowed_deficits": list(self.allowed_deficits),
             "minimum_region_advantages": list(self.minimum_region_advantages),
             "reference_model_allowed_deficits": (
@@ -58,7 +106,13 @@ class ConstrainedObjectiveConfig:
                 if self.reference_model_allowed_deficits is None
                 else list(self.reference_model_allowed_deficits)
             ),
+            "tail_fraction": self.tail_fraction,
+            "tail_temperature": self.tail_temperature,
+            "tail_min_events": self.tail_min_events,
+            "tail_memory_bank_size": self.tail_memory_bank_size,
             "constraint_fraction": self.constraint_fraction,
+            "crossfit_folds": self.crossfit_folds,
+            "fpr_violation_scale": self.fpr_violation_scale,
             "fpr_dual_learning_rate": self.fpr_dual_learning_rate,
             "region_dual_learning_rate": self.region_dual_learning_rate,
             "dual_update_frequency": self.dual_update_frequency,
@@ -87,6 +141,19 @@ class SoftConstraintMetrics:
     reference_efficiencies: torch.Tensor | None = None
     required_efficiencies: torch.Tensor | None = None
     region_margins: torch.Tensor | None = None
+    objective_region_efficiencies: torch.Tensor | None = None
+    objective_baseline_efficiencies: torch.Tensor | None = None
+    objective_region_deltas: torch.Tensor | None = None
+    ranking_loss: torch.Tensor | None = None
+    tail_event_count: int | None = None
+    current_tail_offsets: torch.Tensor | None = None
+
+
+def _parse_regions(values, option):
+    regions = tuple((float(item[0]), float(item[1])) for item in values)
+    if not regions or any(low >= high for low, high in regions):
+        raise ValueError(f"Every {option} region must satisfy low < high")
+    return regions
 
 
 def parse_constrained_objective(config):
@@ -95,26 +162,29 @@ def parse_constrained_objective(config):
     if raw.get("name") != "constrained_trigger":
         raise ValueError("Expected loss.name='constrained_trigger'")
 
-    regions = tuple(
-        (float(region[0]), float(region[1]))
-        for region in raw.get(
-            "regions_gev",
-            ((25.0, 40.0), (40.0, 60.0), (60.0, 120.0)),
-        )
+    legacy_regions = raw.get(
+        "regions_gev",
+        ((25.0, 40.0), (40.0, 60.0), (60.0, 120.0)),
     )
-    if not regions or any(low >= high for low, high in regions):
-        raise ValueError("Every constrained region must satisfy low < high")
-
+    objective_regions = _parse_regions(
+        raw.get("objective_regions_gev", legacy_regions), "objective"
+    )
+    constraint_regions = _parse_regions(
+        raw.get("constraint_regions_gev", legacy_regions), "constraint"
+    )
     weights = tuple(
         float(value)
         for value in raw.get(
-            "region_weights",
-            [1.0 / len(regions)] * len(regions),
+            "objective_region_weights",
+            raw.get(
+                "region_weights",
+                [1.0 / len(objective_regions)] * len(objective_regions),
+            ),
         )
     )
     deficits = tuple(
         float(value)
-        for value in raw.get("allowed_deficits", [0.005] * len(regions))
+        for value in raw.get("allowed_deficits", [0.005] * len(constraint_regions))
     )
     raw_advantages = raw.get("minimum_region_advantages")
     advantages = (
@@ -128,18 +198,19 @@ def parse_constrained_objective(config):
         if raw_reference_deficits is None
         else tuple(float(value) for value in raw_reference_deficits)
     )
+    if len(weights) != len(objective_regions):
+        raise ValueError("Objective regions and weights must have equal lengths")
     if (
-        len(weights) != len(regions)
-        or len(deficits) != len(regions)
-        or len(advantages) != len(regions)
+        len(deficits) != len(constraint_regions)
+        or len(advantages) != len(constraint_regions)
         or (
             reference_deficits is not None
-            and len(reference_deficits) != len(regions)
+            and len(reference_deficits) != len(constraint_regions)
         )
     ):
-        raise ValueError("Regions, weights, and deficits must have equal lengths")
+        raise ValueError("Constraint regions, advantages, and deficits must align")
     if any(value < 0.0 for value in weights) or not np.isclose(sum(weights), 1.0):
-        raise ValueError("Constrained region weights must be non-negative and sum to one")
+        raise ValueError("Objective region weights must be non-negative and sum to one")
     if any(value < 0.0 for value in deficits):
         raise ValueError("Constrained allowed deficits must be non-negative")
     if reference_deficits is not None and any(
@@ -147,17 +218,29 @@ def parse_constrained_objective(config):
     ):
         raise ValueError("Reference-model allowed deficits must be non-negative")
 
+    temperature = float(raw.get("temperature", 0.02))
     legacy_dual_learning_rate = float(raw.get("dual_learning_rate", 1.0))
     result = ConstrainedObjectiveConfig(
-        temperature=float(raw.get("temperature", 0.02)),
+        temperature_start=float(raw.get("temperature_start", temperature)),
+        temperature_end=float(raw.get("temperature_end", temperature)),
+        temperature_schedule=str(raw.get("temperature_schedule", "constant")),
         target_event_fpr=float(raw.get("target_event_fpr", 0.005)),
         trigger_objects=int(raw.get("trigger_objects", 2)),
-        regions_gev=regions,
-        region_weights=weights,
+        primal_objective=str(raw.get("primal_objective", "soft_efficiency")),
+        proxy_threshold_mode=str(raw.get("proxy_threshold_mode", "fixed")),
+        objective_regions_gev=objective_regions,
+        objective_region_weights=weights,
+        constraint_regions_gev=constraint_regions,
         allowed_deficits=deficits,
         minimum_region_advantages=advantages,
         reference_model_allowed_deficits=reference_deficits,
+        tail_fraction=float(raw.get("tail_fraction", 0.05)),
+        tail_temperature=float(raw.get("tail_temperature", 0.2)),
+        tail_min_events=int(raw.get("tail_min_events", 16)),
+        tail_memory_bank_size=int(raw.get("tail_memory_bank_size", 0)),
         constraint_fraction=float(raw.get("constraint_fraction", 0.3)),
+        crossfit_folds=int(raw.get("crossfit_folds", 2)),
+        fpr_violation_scale=float(raw.get("fpr_violation_scale", 1.0)),
         fpr_dual_learning_rate=float(
             raw.get("fpr_dual_learning_rate", legacy_dual_learning_rate)
         ),
@@ -176,18 +259,31 @@ def parse_constrained_objective(config):
         gradient_balance_batches=int(raw.get("gradient_balance_batches", 8)),
         gradient_balance_epsilon=float(raw.get("gradient_balance_epsilon", 1e-12)),
     )
-    if result.temperature <= 0.0:
-        raise ValueError("Constrained temperature must be positive")
+    if result.temperature_start <= 0.0 or result.temperature_end <= 0.0:
+        raise ValueError("Constrained temperatures must be positive")
+    if result.temperature_schedule not in {"constant", "linear", "cosine"}:
+        raise ValueError("temperature_schedule must be constant, linear, or cosine")
+    if result.primal_objective not in {"soft_efficiency", "tail_ranking"}:
+        raise ValueError("primal_objective must be soft_efficiency or tail_ranking")
+    if result.proxy_threshold_mode not in {"fixed", "batch_rank"}:
+        raise ValueError("proxy_threshold_mode must be fixed or batch_rank")
     if not 0.0 < result.target_event_fpr <= 1.0:
         raise ValueError("Constrained target_event_fpr must be in (0, 1]")
     if result.trigger_objects < 1:
         raise ValueError("Constrained trigger_objects must be positive")
+    if not 0.0 < result.tail_fraction <= 1.0:
+        raise ValueError("tail_fraction must be in (0, 1]")
+    if result.tail_temperature <= 0.0 or result.tail_min_events < 1:
+        raise ValueError("Tail temperature and minimum event count must be positive")
+    if result.tail_memory_bank_size < 0:
+        raise ValueError("tail_memory_bank_size cannot be negative")
     if not 0.0 < result.constraint_fraction < 1.0:
         raise ValueError("constraint_fraction must be in (0, 1)")
-    if (
-        result.fpr_dual_learning_rate <= 0.0
-        or result.region_dual_learning_rate <= 0.0
-    ):
+    if result.crossfit_folds != 2:
+        raise ValueError("Hard constraint cross-fitting currently requires two folds")
+    if result.fpr_violation_scale <= 0.0:
+        raise ValueError("fpr_violation_scale must be positive")
+    if result.fpr_dual_learning_rate <= 0.0 or result.region_dual_learning_rate <= 0.0:
         raise ValueError("Constrained dual learning rates must be positive")
     if result.dual_update_frequency < 1 or result.dual_warmup_epochs < 0:
         raise ValueError("Invalid constrained dual update schedule")
@@ -225,10 +321,42 @@ def soft_object_pass(
         raise ValueError(f"Unsupported constrained classifier: {classifier_name}")
     if tob_pt_gev_values is None or tob_threshold_gev is None:
         raise ValueError("OR constrained training requires TOB values and threshold")
-
-    # The first controlled OR experiment keeps the comparator branch hard.
     tob_pass = (tob_pt_gev_values >= tob_threshold_gev).to(nn_pass.dtype)
     return tob_pass + (1.0 - tob_pass) * nn_pass
+
+
+def kth_event_score(object_scores, object_mask, k=2):
+    """Return the k-th largest valid object score for every complete event."""
+    if object_scores.shape != object_mask.shape or object_scores.ndim != 2:
+        raise ValueError("Expected aligned [events, objects] scores and mask")
+    if k < 1 or object_scores.shape[1] < k:
+        raise ValueError("The requested event rank is unavailable")
+    masked = object_scores.masked_fill(~object_mask, -torch.inf)
+    result = torch.topk(masked, k=k, dim=1).values[:, -1]
+    # Events with fewer than k objects can never fire and therefore receive
+    # negative infinity rather than aborting an otherwise valid batch.
+    return result.masked_fill(object_mask.sum(dim=1) < k, -torch.inf)
+
+
+def rank_calibrated_threshold(
+    object_logits,
+    object_mask,
+    background_event_mask,
+    target_fpr,
+    trigger_objects=2,
+    temperature=0.02,
+):
+    """Select a batch threshold by rank, preserving additive-shift invariance."""
+    event_scores = kth_event_score(object_logits, object_mask, trigger_objects)
+    background_scores = event_scores[background_event_mask]
+    background_event_count = int(background_scores.numel())
+    background_scores = background_scores[torch.isfinite(background_scores)]
+    if not background_scores.numel():
+        raise ValueError("Rank calibration requires background events")
+    accepted = int(math.floor(target_fpr * background_event_count))
+    if accepted < 1:
+        return background_scores.max() + 8.0 * float(temperature)
+    return torch.topk(background_scores, k=accepted).values[-1]
 
 
 def probability_at_least_k(object_probabilities, object_mask, k=2):
@@ -237,11 +365,9 @@ def probability_at_least_k(object_probabilities, object_mask, k=2):
         raise ValueError("Object probabilities and mask must have equal shapes")
     if object_probabilities.ndim != 2 or k < 1:
         raise ValueError("Expected [events, objects] probabilities and positive k")
-
     event_count = object_probabilities.shape[0]
     probabilities_below_k = object_probabilities.new_zeros((event_count, k))
     probabilities_below_k[:, 0] = 1.0
-
     for index in range(object_probabilities.shape[1]):
         probability = object_probabilities[:, index]
         valid = object_mask[:, index]
@@ -253,12 +379,105 @@ def probability_at_least_k(object_probabilities, object_mask, k=2):
                 + probabilities_below_k[:, count - 1] * probability
             )
         probabilities_below_k = torch.where(
-            valid.unsqueeze(1),
-            updated,
-            probabilities_below_k,
+            valid.unsqueeze(1), updated, probabilities_below_k
+        )
+    return (1.0 - probabilities_below_k.sum(dim=1)).clamp(0.0, 1.0)
+
+
+def _soft_region_values(
+    object_pass_probabilities,
+    object_mask,
+    signal_object_mask,
+    truth_pt_gev,
+    comparison_object_pass,
+    regions,
+):
+    efficiencies = []
+    comparisons = []
+    valid_regions = []
+    for low, high in regions:
+        in_region = (
+            signal_object_mask
+            & object_mask
+            & (truth_pt_gev >= low)
+            & (truth_pt_gev < high)
+        )
+        count = in_region.sum()
+        denominator = count.clamp(min=1).to(object_pass_probabilities.dtype)
+        efficiencies.append((object_pass_probabilities * in_region).sum() / denominator)
+        comparisons.append(
+            (comparison_object_pass.to(object_pass_probabilities.dtype) * in_region).sum()
+            / denominator
+        )
+        valid_regions.append(count > 0)
+    return torch.stack(efficiencies), torch.stack(comparisons), torch.stack(valid_regions)
+
+
+def tail_ranking_objective(
+    object_logits,
+    object_mask,
+    signal_object_mask,
+    background_event_mask,
+    truth_pt_gev,
+    objective_config,
+    memory_tail_offsets=None,
+):
+    """Compare truth taus with a rank-selected high-background event tail."""
+    background_event_scores = kth_event_score(
+        object_logits, object_mask, objective_config.trigger_objects
+    )[background_event_mask]
+    background_event_count = int(background_event_scores.numel())
+    background_event_scores = background_event_scores[
+        torch.isfinite(background_event_scores)
+    ]
+    if not background_event_scores.numel():
+        raise ValueError("Tail ranking requires background events in every batch")
+
+    # Rank-defined median centering keeps a hard-negative memory bank invariant
+    # to a common additive shift of all current logits.
+    center = torch.median(background_event_scores)
+    requested = int(math.ceil(
+        objective_config.tail_fraction * background_event_count
+    ))
+    tail_count = min(
+        background_event_scores.numel(),
+        max(objective_config.tail_min_events, requested),
+    )
+    current_tail_offsets = torch.topk(
+        background_event_scores, k=tail_count
+    ).values - center
+    tail_offsets = current_tail_offsets
+    if memory_tail_offsets is not None and memory_tail_offsets.numel():
+        tail_offsets = torch.cat(
+            (tail_offsets, memory_tail_offsets.to(tail_offsets.device)), dim=0
         )
 
-    return (1.0 - probabilities_below_k.sum(dim=1)).clamp(0.0, 1.0)
+    losses = []
+    valid = []
+    for low, high in objective_config.objective_regions_gev:
+        in_region = (
+            signal_object_mask
+            & object_mask
+            & (truth_pt_gev >= low)
+            & (truth_pt_gev < high)
+        )
+        signal_offsets = object_logits[in_region] - center
+        if signal_offsets.numel():
+            pairwise = (
+                tail_offsets.unsqueeze(0) - signal_offsets.unsqueeze(1)
+            ) / objective_config.tail_temperature
+            losses.append(F.softplus(pairwise).mean())
+            valid.append(True)
+        else:
+            losses.append(object_logits.new_zeros(()))
+            valid.append(False)
+    losses = torch.stack(losses)
+    valid = torch.tensor(valid, dtype=torch.bool, device=losses.device)
+    weights = losses.new_tensor(objective_config.objective_region_weights)
+    active = weights * valid.to(weights.dtype)
+    active = active / active.sum().clamp(min=1e-12)
+    ranking_loss = torch.sum(active * losses)
+    return -ranking_loss, ranking_loss, current_tail_offsets.detach(), tail_offsets.numel()
 
 
 def calculate_soft_constraint_metrics(
@@ -270,58 +489,56 @@ def calculate_soft_constraint_metrics(
     baseline_object_pass,
     objective_config,
     reference_object_pass_probabilities=None,
+    objective_override=None,
+    ranking_loss=None,
+    tail_event_count=None,
+    current_tail_offsets=None,
 ):
-    """Calculate the differentiable objective and constraint violations."""
+    """Calculate the differentiable objective and proxy violations."""
     event_pass = probability_at_least_k(
-        object_pass_probabilities,
-        object_mask,
-        k=objective_config.trigger_objects,
+        object_pass_probabilities, object_mask, k=objective_config.trigger_objects
     )
     if not torch.any(background_event_mask):
         raise ValueError("Every constrained batch must contain background events")
     event_fpr = event_pass[background_event_mask].mean()
 
-    efficiencies = []
-    baseline_efficiencies = []
-    reference_efficiencies = []
-    valid_regions = []
-    for low, high in objective_config.regions_gev:
-        in_region = (
-            signal_object_mask
-            & object_mask
-            & (truth_pt_gev >= low)
-            & (truth_pt_gev < high)
-        )
-        count = in_region.sum()
-        valid = count > 0
-        denominator = count.clamp(min=1).to(object_pass_probabilities.dtype)
-        efficiencies.append(
-            (object_pass_probabilities * in_region).sum() / denominator
-        )
-        baseline_efficiencies.append(
-            (baseline_object_pass.to(object_pass_probabilities.dtype) * in_region).sum()
-            / denominator
-        )
-        if reference_object_pass_probabilities is not None:
-            reference_efficiencies.append(
-                (reference_object_pass_probabilities * in_region).sum()
-                / denominator
-            )
-        valid_regions.append(valid)
-
-    efficiencies = torch.stack(efficiencies)
-    baseline_efficiencies = torch.stack(baseline_efficiencies)
-    reference_efficiencies = (
-        None
-        if reference_object_pass_probabilities is None
-        else torch.stack(reference_efficiencies)
+    objective_eff, objective_base, objective_valid = _soft_region_values(
+        object_pass_probabilities,
+        object_mask,
+        signal_object_mask,
+        truth_pt_gev,
+        baseline_object_pass,
+        objective_config.objective_regions_gev,
     )
-    valid_regions = torch.stack(valid_regions)
-    deltas = efficiencies - baseline_efficiencies
-    weights = object_pass_probabilities.new_tensor(objective_config.region_weights)
-    active_weights = weights * valid_regions.to(weights.dtype)
+    objective_deltas = objective_eff - objective_base
+    weights = object_pass_probabilities.new_tensor(
+        objective_config.objective_region_weights
+    )
+    active_weights = weights * objective_valid.to(weights.dtype)
     active_weights = active_weights / active_weights.sum().clamp(min=1e-12)
-    objective = torch.sum(active_weights * deltas)
+    objective = torch.sum(active_weights * objective_deltas)
+    if objective_override is not None:
+        objective = objective_override
+
+    efficiencies, baseline_efficiencies, valid_regions = _soft_region_values(
+        object_pass_probabilities,
+        object_mask,
+        signal_object_mask,
+        truth_pt_gev,
+        baseline_object_pass,
+        objective_config.constraint_regions_gev,
+    )
+    deltas = efficiencies - baseline_efficiencies
+    reference_efficiencies = None
+    if reference_object_pass_probabilities is not None:
+        reference_efficiencies, _, _ = _soft_region_values(
+            reference_object_pass_probabilities,
+            object_mask,
+            signal_object_mask,
+            truth_pt_gev,
+            baseline_object_pass,
+            objective_config.constraint_regions_gev,
+        )
 
     minimum_advantages = object_pass_probabilities.new_tensor(
         objective_config.minimum_region_advantages
@@ -334,18 +551,14 @@ def calculate_soft_constraint_metrics(
             objective_config.reference_model_allowed_deficits
         )
         required_efficiencies = torch.maximum(
-            required_efficiencies,
-            reference_efficiencies - reference_deficits,
+            required_efficiencies, reference_efficiencies - reference_deficits
         )
-    # No classifier can exceed unit efficiency in a saturated region.
     required_efficiencies = required_efficiencies.clamp(max=1.0)
     region_margins = efficiencies - required_efficiencies
-    violations = torch.cat(
-        (
-            (event_fpr - objective_config.target_event_fpr).reshape(1),
-            -region_margins,
-        )
-    )
+    fpr_violation = (
+        event_fpr - objective_config.target_event_fpr
+    ) * objective_config.fpr_violation_scale
+    violations = torch.cat((fpr_violation.reshape(1), -region_margins))
     return SoftConstraintMetrics(
         objective=objective,
         event_fpr=event_fpr,
@@ -357,6 +570,12 @@ def calculate_soft_constraint_metrics(
         reference_efficiencies=reference_efficiencies,
         required_efficiencies=required_efficiencies,
         region_margins=region_margins,
+        objective_region_efficiencies=objective_eff,
+        objective_baseline_efficiencies=objective_base,
+        objective_region_deltas=objective_deltas,
+        ranking_loss=ranking_loss,
+        tail_event_count=tail_event_count,
+        current_tail_offsets=current_tail_offsets,
     )
 
 
@@ -365,11 +584,42 @@ def calibrate_tob_baseline(background, target_fpr, trigger_objects=2):
     frame = background.copy()
     frame["_tob_pt_gev"] = tob_pt_gev(frame)
     scores, event_count = build_event_trigger_scores(
-        frame,
-        "_tob_pt_gev",
-        objects=trigger_objects,
+        frame, "_tob_pt_gev", objects=trigger_objects
     )
     return select_fpr_threshold(scores, event_count, target_fpr)
+
+
+def _truth_pt_gev(signal):
+    values = signal["truth_pt"].to_numpy(dtype=np.float64)
+    finite = values[np.isfinite(values) & (values > 0.0)]
+    if finite.size and np.median(finite) > 1000.0:
+        values = values / 1000.0
+    return values
+
+
+def _hard_region_values(truth_pt, passed, comparison, regions):
+    efficiencies = []
+    comparisons = []
+    counts = []
+    pass_counts = []
+    comparison_counts = []
+    for low, high in regions:
+        in_region = (truth_pt >= low) & (truth_pt < high)
+        count = int(np.count_nonzero(in_region))
+        counts.append(count)
+        if not count:
+            efficiencies.append(None)
+            comparisons.append(None)
+            pass_counts.append(0)
+            comparison_counts.append(0)
+            continue
+        pass_count = int(np.count_nonzero(passed[in_region]))
+        comparison_count = int(np.count_nonzero(comparison[in_region]))
+        pass_counts.append(pass_count)
+        comparison_counts.append(comparison_count)
+        efficiencies.append(pass_count / count)
+        comparisons.append(comparison_count / count)
+    return efficiencies, comparisons, counts, pass_counts, comparison_counts
 
 
 def calculate_hard_constraint_metrics(
@@ -417,94 +667,119 @@ def calculate_hard_constraint_metrics(
                 classifier_config,
             )
         reference_pass = classifier_object_pass_mask(
-            reference_signal,
-            reference_calibration,
+            reference_signal, reference_calibration
         )
-    truth_pt = signal["truth_pt"].to_numpy(dtype=np.float64)
-    finite = truth_pt[np.isfinite(truth_pt) & (truth_pt > 0.0)]
-    if finite.size and np.median(finite) > 1000.0:
-        truth_pt = truth_pt / 1000.0
+    truth_pt = _truth_pt_gev(signal)
 
-    efficiencies = []
-    baseline_efficiencies = []
-    reference_efficiencies = []
+    (
+        objective_efficiencies,
+        objective_baselines,
+        objective_counts,
+        objective_pass_counts,
+        objective_baseline_counts,
+    ) = _hard_region_values(
+        truth_pt,
+        signal_pass,
+        baseline_pass,
+        objective_config.objective_regions_gev,
+    )
+    objective_deltas = [
+        None if value is None else value - base
+        for value, base in zip(objective_efficiencies, objective_baselines)
+    ]
+    valid_objective = np.asarray([value is not None for value in objective_deltas])
+    delta_values = np.asarray(
+        [0.0 if value is None else value for value in objective_deltas],
+        dtype=np.float64,
+    )
+    weights = np.asarray(
+        objective_config.objective_region_weights, dtype=np.float64
+    ) * valid_objective
+    weights = weights / weights.sum() if weights.sum() else weights
+    objective = float(np.sum(weights * delta_values))
+
+    efficiencies, baseline_efficiencies, counts, pass_counts, baseline_counts = (
+        _hard_region_values(
+            truth_pt,
+            signal_pass,
+            baseline_pass,
+            objective_config.constraint_regions_gev,
+        )
+    )
+    reference_efficiencies = [None] * len(counts)
+    reference_counts = [0] * len(counts)
+    if reference_pass is not None:
+        reference_efficiencies, _, _, reference_counts, _ = _hard_region_values(
+            truth_pt,
+            reference_pass,
+            baseline_pass,
+            objective_config.constraint_regions_gev,
+        )
+
     required_efficiencies = []
     deltas = []
-    counts = []
-    for low, high in objective_config.regions_gev:
-        in_region = (truth_pt >= low) & (truth_pt < high)
-        counts.append(int(np.count_nonzero(in_region)))
-        if not np.any(in_region):
-            efficiencies.append(None)
-            baseline_efficiencies.append(None)
-            reference_efficiencies.append(None)
+    margins = []
+    for index, (efficiency, baseline_efficiency) in enumerate(
+        zip(efficiencies, baseline_efficiencies)
+    ):
+        if efficiency is None:
             required_efficiencies.append(None)
             deltas.append(None)
+            margins.append(0.0)
             continue
-        efficiency = float(signal_pass[in_region].mean())
-        baseline_efficiency = float(baseline_pass[in_region].mean())
-        efficiencies.append(efficiency)
-        baseline_efficiencies.append(baseline_efficiency)
-        reference_efficiency = (
-            None if reference_pass is None else float(reference_pass[in_region].mean())
-        )
-        reference_efficiencies.append(reference_efficiency)
-        required = baseline_efficiency + objective_config.minimum_region_advantages[
-            len(efficiencies) - 1
-        ]
-        if reference_efficiency is not None:
+        required = baseline_efficiency + objective_config.minimum_region_advantages[index]
+        if reference_efficiencies[index] is not None:
             required = max(
                 required,
-                reference_efficiency
-                - objective_config.reference_model_allowed_deficits[
-                    len(efficiencies) - 1
-                ],
+                reference_efficiencies[index]
+                - objective_config.reference_model_allowed_deficits[index],
             )
         required = min(required, 1.0)
         required_efficiencies.append(required)
         deltas.append(efficiency - baseline_efficiency)
+        margins.append(efficiency - required)
 
     valid = np.asarray([value is not None for value in deltas])
-    delta_values = np.asarray(
-        [0.0 if value is None else value for value in deltas],
-        dtype=np.float64,
-    )
-    weights = np.asarray(objective_config.region_weights, dtype=np.float64)
-    weights = weights * valid
-    weights = weights / weights.sum() if weights.sum() else weights
-    objective = float(np.sum(weights * delta_values))
-    margins = np.asarray(
-        [
-            0.0 if required is None else efficiency - required
-            for efficiency, required in zip(efficiencies, required_efficiencies)
-        ],
-        dtype=np.float64,
-    )
+    margins_array = np.asarray(margins, dtype=np.float64)
     resolutions = [None if count < 1 else 1.0 / count for count in counts]
     margin_in_objects = [
         None if resolution is None else float(margin / resolution)
-        for margin, resolution in zip(margins, resolutions)
+        for margin, resolution in zip(margins_array, resolutions)
     ]
-
     event_pass = classifier_event_pass_mask(background, calibration)
-    achieved_fpr = float(event_pass.mean())
+    background_event_count = int(background["eventNumber"].nunique())
+    background_event_pass_count = int(np.count_nonzero(event_pass))
+    achieved_fpr = float(background_event_pass_count / background_event_count)
     return {
         "objective_value": objective,
         "achieved_fpr": achieved_fpr,
+        "objective_region_efficiencies": objective_efficiencies,
+        "objective_baseline_efficiencies": objective_baselines,
+        "objective_region_deltas": objective_deltas,
+        "objective_region_counts": objective_counts,
+        "objective_region_pass_counts": objective_pass_counts,
+        "objective_baseline_pass_counts": objective_baseline_counts,
         "region_efficiencies": efficiencies,
         "baseline_efficiencies": baseline_efficiencies,
         "reference_efficiencies": reference_efficiencies,
         "required_efficiencies": required_efficiencies,
         "region_deltas": deltas,
         "region_counts": counts,
+        "region_pass_counts": pass_counts,
+        "baseline_pass_counts": baseline_counts,
+        "reference_pass_counts": reference_counts,
         "region_efficiency_resolutions": resolutions,
-        "constraint_margins": margins.tolist(),
+        "constraint_margins": margins_array.tolist(),
         "constraint_margins_in_objects": margin_in_objects,
         "constraints_satisfied": bool(
             achieved_fpr <= objective_config.target_event_fpr + 1e-12
-            and np.all(margins[valid] >= 0.0)
+            and np.all(margins_array[valid] >= 0.0)
         ),
-        "minimum_margin": float(np.min(margins[valid])) if np.any(valid) else None,
+        "minimum_margin": (
+            float(np.min(margins_array[valid])) if np.any(valid) else None
+        ),
+        "background_event_count": background_event_count,
+        "background_event_pass_count": background_event_pass_count,
         "classifier_calibration": calibration,
         "baseline_threshold_gev": float(baseline_threshold_gev),
     }

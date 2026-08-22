@@ -235,6 +235,64 @@ The matching Stage-G OR budget screen is split across
 and 0.15% separately; Stage F is the zero-budget control. Select the budget
 from validation results, not test performance.
 
+The rank-based Stage-H follow-up is under
+`configs/constrained_stage_h_rank_s42/`,
+`configs/constrained_stage_h_rank_s123/`, and
+`configs/constrained_stage_h_rank_s456/`. Each seed contains three controlled
+runs: a rank-calibrated soft-efficiency control, a 5% background-tail ranking
+objective, and the same ranking objective with a centered hard-negative memory
+bank. The three directories can run as independent GPU jobs.
+
+### Rank-based constrained objective
+
+New configs separate what should improve from what must remain protected:
+
+```json
+"objective_regions_gev": [[25, 32], [32, 40], [40, 60]],
+"objective_region_weights": [0.35, 0.35, 0.30],
+"constraint_regions_gev": [[25, 32], [32, 40], [40, 60], [60, 120]]
+```
+
+The saturated 60--120 GeV region therefore keeps its full baseline/reference
+guard but contributes no noisy term to the improvement objective. Legacy
+`regions_gev` and `region_weights` configs remain supported. With explicit
+`minimum_region_advantages`, `allowed_deficits` remain legacy/fallback metadata;
+the active floor is the stricter of `baseline + minimum advantage` and
+`pretrained - reference deficit`.
+
+Set `primal_objective: "tail_ranking"` to compare truth-tau object logits with
+the second-highest logit of difficult background events. The tail is selected
+by rank, never by an absolute score cut. `tail_fraction: 0.05` uses the top 5%
+rather than the statistically sparse 0.5% point. The resulting loss is
+invariant to a common additive logit shift. An optional
+`tail_memory_bank_size` stores only median-centered hard-event offsets, which
+preserves this invariance; zero disables the bank.
+
+The differentiable constraint proxy can use
+`proxy_threshold_mode: "batch_rank"`. Its cut is recalculated from current
+background-event ranks and is therefore shift invariant too.
+`temperature_start`, `temperature_end`, and `temperature_schedule` implement
+continuation from a broad proxy to a sharper one. Stage H uses a cosine schedule
+from 0.10 to 0.02. Tail ranking has its own `tail_temperature`, because it acts
+on pairwise logit differences rather than a threshold sigmoid.
+
+Dual updates no longer reuse the frozen initialization threshold. The training
+constraint subset is split into two event-level folds: calibrate on A and
+measure hard FPR/efficiencies on B, then swap and pool the held-out counts. Only
+these training-only cross-fitted violations update the multipliers.
+`fpr_violation_scale` is applied consistently to the soft proxy and hard dual
+update. Stage H uses 200, which expresses the FPR error relative to the 0.5%
+target instead of hiding it at a numerical scale of roughly `1e-3`. Because a
+rank-calibrated proxy makes the soft FPR nearly fixed by construction, Stage H
+does not use the old gradient-balance initialization: its FPR price starts at
+zero and grows only after a held-out training fold violates the hard FPR target.
+
+Every epoch records, per protected region, a histogram and quantiles of
+`(logit - calibrated_logit_threshold) / temperature`, fractions inside one and
+three temperatures, missed taus below minus three temperatures, and summed
+boundary/tail gradient diagnostics. These diagnostics never select a checkpoint
+or a hyperparameter.
+
 The event-FPR multiplier can use the legacy fixed initialization or
 `initial_fpr_multiplier_mode: "gradient_balance"`. Gradient balancing measures
 the objective and FPR gradient norms on training batches only, uses their median
@@ -254,8 +312,8 @@ Energy guards can also protect the pretrained model. For region `k`, the
 required efficiency is the larger of `baseline + minimum_region_advantages[k]`
 and `pretrained - reference_model_allowed_deficits[k]`. Omitting these fields
 keeps the legacy baseline-deficit behavior. The reference network is frozen and
-uses the same training-only calibration, so it cannot leak validation or test
-information into gradient updates.
+is calibrated through the same training-only cross-fitted protocol, so it
+cannot leak validation or test information into gradient updates.
 
 Before training, saved predictions can be used to verify that smooth and exact
 trigger metrics behave consistently across several temperatures:
@@ -276,7 +334,12 @@ hyperparameters. New constrained configs can also be generated with
 `--constrained-reference-model-deficits`; the multiplier ceiling is controlled
 by `--constrained-max-multiplier`. Separate dual rates can be generated with
 `--constrained-fpr-dual-learning-rate` and
-`--constrained-region-dual-learning-rate`.
+`--constrained-region-dual-learning-rate`. The separated schema uses repeated
+`--constrained-objective-region LOW,HIGH,WEIGHT` and
+`--constrained-constraint-region LOW,HIGH,DEFICIT`. Rank-based runs additionally
+use `--constrained-primal-objective tail_ranking`,
+`--constrained-proxy-threshold-mode batch_rank`, and the
+`--constrained-tail-*` options.
 
 ### Step 2: Train the Network
 Main training script. 

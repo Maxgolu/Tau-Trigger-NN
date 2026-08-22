@@ -78,9 +78,10 @@ def _soft_metrics_from_batch(
     objective_config,
 ):
     """Accumulate soft rates over a reusable complete-event tensor."""
-    signal_sums = np.zeros(len(objective_config.regions_gev), dtype=np.float64)
-    baseline_sums = np.zeros(len(objective_config.regions_gev), dtype=np.float64)
-    signal_counts = np.zeros(len(objective_config.regions_gev), dtype=np.int64)
+    region_count = len(objective_config.objective_regions_gev)
+    signal_sums = np.zeros(region_count, dtype=np.float64)
+    baseline_sums = np.zeros(region_count, dtype=np.float64)
+    signal_counts = np.zeros(region_count, dtype=np.int64)
     with torch.no_grad():
         object_scores = batch.features[..., 0]
         probabilities = soft_object_pass(
@@ -100,7 +101,9 @@ def _soft_metrics_from_batch(
         background_count = int(batch.background_event_mask.sum())
 
         baseline_pass = batch.tob_pt_gev >= baseline_threshold_gev
-        for index, (low, high) in enumerate(objective_config.regions_gev):
+        for index, (low, high) in enumerate(
+            objective_config.objective_regions_gev
+        ):
             selected = (
                 batch.signal_object_mask
                 & batch.object_mask
@@ -126,7 +129,7 @@ def _soft_metrics_from_batch(
         where=signal_counts > 0,
     )
     valid = signal_counts > 0
-    weights = np.asarray(objective_config.region_weights) * valid
+    weights = np.asarray(objective_config.objective_region_weights) * valid
     if weights.sum():
         weights /= weights.sum()
     deltas = efficiencies - baseline_efficiencies
@@ -173,7 +176,9 @@ def diagnose_run(run_dir, classifier_config, objective_raw, temperatures):
                 "loss": {
                     "name": "constrained_trigger",
                     **objective_raw,
-                    "temperature": float(temperature),
+                    "temperature_start": float(temperature),
+                    "temperature_end": float(temperature),
+                    "temperature_schedule": "constant",
                 }
             }
         )

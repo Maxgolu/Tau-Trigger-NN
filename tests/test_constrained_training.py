@@ -2,6 +2,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import torch
 
 
@@ -13,6 +15,7 @@ from constrained_objective import (
 )
 from constrained_training import (
     DualState,
+    HardNegativeMemoryBank,
     _is_better_hard_candidate,
     constraint_resolution_warnings,
     constrained_primal_loss,
@@ -21,7 +24,12 @@ from constrained_training import (
     parameter_gradient_norm,
     update_dual_state,
 )
+from constrained_validation import (
+    build_constraint_crossfit_rows,
+    calculate_cross_fitted_hard_metrics,
+)
 from event_data import EventBatch
+from model import DynamicMLP
 
 
 class ConstrainedTrainingTests(unittest.TestCase):
@@ -182,6 +190,111 @@ class ConstrainedTrainingTests(unittest.TestCase):
             selected,
             min(diagnostic["recommended_unclipped"], config.max_multiplier),
         )
+
+    def test_fixed_fpr_initialization_skips_ill_conditioned_gradient_ratio(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "initial_fpr_multiplier_mode": "fixed",
+                    "initial_fpr_multiplier": 0.0,
+                }
+            }
+        )
+        selected, diagnostic = initialize_fpr_multiplier_from_gradients(
+            torch.nn.Linear(1, 1),
+            [],
+            None,
+            config,
+            fixed_nn_threshold=0.5,
+            fixed_tob_threshold=None,
+            baseline_threshold_gev=20.0,
+        )
+        self.assertEqual(selected, 0.0)
+        self.assertEqual(diagnostic["batches_measured"], 0)
+        self.assertIsNone(diagnostic["recommended_unclipped"])
+
+    def test_dynamic_model_exposes_logits_without_changing_probabilities(self):
+        model = DynamicMLP(2, [3])
+        inputs = torch.tensor([[0.2, -0.1], [1.0, 2.0]])
+        logits = model.forward_logits(inputs)
+        self.assertTrue(torch.allclose(model(inputs), torch.sigmoid(logits)))
+        self.assertIn("network.0.weight", model.state_dict())
+        self.assertIn("network.2.weight", model.state_dict())
+
+    def test_hard_negative_bank_keeps_largest_centered_offsets(self):
+        bank = HardNegativeMemoryBank(3)
+        bank.update(torch.tensor([0.1, 0.5]))
+        bank.update(torch.tensor([0.2, 0.8]))
+        self.assertEqual(len(bank), 3)
+        self.assertTrue(
+            torch.equal(bank.values, torch.tensor([0.8, 0.5, 0.2]))
+        )
+
+    def test_cross_fitted_constraints_measure_held_out_training_events(self):
+        rows = []
+        scores = []
+        for event in range(8):
+            for obj, score in enumerate((0.05 + event * 0.01, 0.10 + event * 0.01)):
+                rows.append(
+                    {
+                        "eventNumber": event,
+                        "tob_index": obj,
+                        "Type": "BKG",
+                        "signal": 0,
+                        "truth_pt": 0.0,
+                        "tob_pt": 5.0 + score,
+                    }
+                )
+                scores.append(score)
+        for event in range(8, 16):
+            for obj, score in enumerate((0.70, 0.80)):
+                rows.append(
+                    {
+                        "eventNumber": event,
+                        "tob_index": obj,
+                        "Type": "Signal",
+                        "signal": 1,
+                        "truth_pt": 30.0 + obj * 20.0,
+                        "tob_pt": 20.0 + obj * 10.0,
+                    }
+                )
+                scores.append(score)
+        frame = pd.DataFrame(rows)
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "target_event_fpr": 0.25,
+                    "objective_regions_gev": [[25, 60]],
+                    "objective_region_weights": [1.0],
+                    "constraint_regions_gev": [[25, 60]],
+                    "allowed_deficits": [0.5],
+                }
+            }
+        )
+        classifier = parse_classifier(
+            {
+                "classifier": {
+                    "name": "nn_only",
+                    "target_fpr": 0.25,
+                    "trigger_objects": 2,
+                }
+            }
+        )
+        folds = build_constraint_crossfit_rows(frame, seed=123)
+        metrics = calculate_cross_fitted_hard_metrics(
+            frame,
+            np.asarray(scores),
+            None,
+            classifier,
+            config,
+            folds,
+        )
+        self.assertTrue(metrics["cross_fitted"])
+        self.assertEqual(metrics["background_event_count"], 8)
+        self.assertEqual(metrics["region_counts"], [16])
+        self.assertEqual(len(metrics["folds"]), 2)
 
 
 if __name__ == "__main__":

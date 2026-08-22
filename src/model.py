@@ -40,9 +40,15 @@ class DynamicMLP(nn.Module):
         """
         Forward pass through the network.
         Accepts input tensors of shape (batch_size, input_dim).
-        Returns unnormalized logits of shape (batch_size, 1).
+        Returns probabilities of shape (batch_size, 1).
         """
-        return self.network(x)
+        return torch.sigmoid(self.forward_logits(x))
+
+    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
+        """Return pre-sigmoid scores without changing saved parameter names."""
+        # The final module is the legacy Sigmoid. Keeping it in ``network``
+        # preserves exact state-dict compatibility with every saved checkpoint.
+        return self.network[:-1](x)
 
 
 if __name__ == "__main__":

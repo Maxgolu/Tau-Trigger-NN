@@ -16,8 +16,15 @@ from constrained_objective import (
     calculate_hard_constraint_metrics,
     calculate_soft_constraint_metrics,
     calibrate_tob_baseline,
+    rank_calibrated_threshold,
     parse_constrained_objective,
     soft_object_pass,
+    tail_ranking_objective,
+)
+from constrained_validation import (
+    build_constraint_crossfit_rows,
+    calculate_cross_fitted_hard_metrics,
+    regional_gradient_diagnostics,
 )
 from event_data import (
     EventTensorDataset,
@@ -37,6 +44,32 @@ class DualState:
 
     def to_dict(self):
         return {"multipliers": self.multipliers.detach().cpu().tolist()}
+
+
+class HardNegativeMemoryBank:
+    """Keep rank-selected, median-centered background event offsets."""
+
+    def __init__(self, capacity):
+        self.capacity = int(capacity)
+        self._values = None
+
+    @property
+    def values(self):
+        return self._values
+
+    @torch.no_grad()
+    def update(self, values):
+        if self.capacity <= 0 or values is None or not values.numel():
+            return
+        values = values.detach()
+        combined = values if self._values is None else torch.cat(
+            (self._values.to(values.device), values), dim=0
+        )
+        keep = min(self.capacity, combined.numel())
+        self._values = torch.topk(combined, k=keep).values.detach()
+
+    def __len__(self):
+        return 0 if self._values is None else int(self._values.numel())
 
 
 def constrained_primal_loss(metrics, dual_state):
@@ -116,30 +149,92 @@ def _soft_batch_metrics(
     fixed_tob_threshold,
     baseline_threshold_gev,
     reference_model=None,
+    temperature=None,
+    tail_memory_bank=None,
+    update_memory=False,
 ):
     """Build the differentiable objective for one complete-event batch."""
+    if temperature is None:
+        temperature = objective_config.temperature
     scores = _event_model_scores(model, batch)
-    pass_probabilities = soft_object_pass(
-        scores,
-        fixed_nn_threshold,
-        objective_config.temperature,
-        classifier_config.name,
-        batch.tob_pt_gev,
-        fixed_tob_threshold,
+    logits = None
+    rank_proxy = (
+        objective_config.primal_objective == "tail_ranking"
+        or objective_config.proxy_threshold_mode == "batch_rank"
     )
+    if rank_proxy:
+        if classifier_config.name != "nn_only":
+            raise ValueError("Rank-calibrated proxies currently require nn_only")
+        logits = _event_model_logits(model, batch)
+        nn_threshold = rank_calibrated_threshold(
+            logits,
+            batch.object_mask,
+            batch.background_event_mask,
+            objective_config.target_event_fpr,
+            objective_config.trigger_objects,
+            temperature,
+        )
+        pass_probabilities = soft_object_pass(
+            logits,
+            nn_threshold,
+            temperature,
+            classifier_config.name,
+        )
+    else:
+        pass_probabilities = soft_object_pass(
+            scores,
+            fixed_nn_threshold,
+            temperature,
+            classifier_config.name,
+            batch.tob_pt_gev,
+            fixed_tob_threshold,
+        )
     baseline_pass = batch.tob_pt_gev >= baseline_threshold_gev
     reference_pass_probabilities = None
     if reference_model is not None:
         with torch.no_grad():
             reference_scores = _event_model_scores(reference_model, batch)
+            reference_threshold = fixed_nn_threshold
+            reference_input = reference_scores
+            if rank_proxy:
+                reference_logits = _event_model_logits(reference_model, batch)
+                reference_threshold = rank_calibrated_threshold(
+                    reference_logits,
+                    batch.object_mask,
+                    batch.background_event_mask,
+                    objective_config.target_event_fpr,
+                    objective_config.trigger_objects,
+                    temperature,
+                )
+                reference_input = reference_logits
             reference_pass_probabilities = soft_object_pass(
-                reference_scores,
-                fixed_nn_threshold,
-                objective_config.temperature,
+                reference_input,
+                reference_threshold,
+                temperature,
                 classifier_config.name,
                 batch.tob_pt_gev,
                 fixed_tob_threshold,
             )
+    objective_override = None
+    ranking_loss = None
+    current_tail_offsets = None
+    tail_event_count = None
+    if objective_config.primal_objective == "tail_ranking":
+        memory_values = None if tail_memory_bank is None else tail_memory_bank.values
+        (
+            objective_override,
+            ranking_loss,
+            current_tail_offsets,
+            tail_event_count,
+        ) = tail_ranking_objective(
+            logits,
+            batch.object_mask,
+            batch.signal_object_mask,
+            batch.background_event_mask,
+            batch.truth_pt_gev,
+            objective_config,
+            memory_tail_offsets=memory_values,
+        )
     metrics = calculate_soft_constraint_metrics(
         pass_probabilities,
         batch.object_mask,
@@ -149,7 +244,13 @@ def _soft_batch_metrics(
         baseline_pass,
         objective_config,
         reference_object_pass_probabilities=reference_pass_probabilities,
+        objective_override=objective_override,
+        ranking_loss=ranking_loss,
+        tail_event_count=tail_event_count,
+        current_tail_offsets=current_tail_offsets,
     )
+    if update_memory and tail_memory_bank is not None:
+        tail_memory_bank.update(current_tail_offsets)
     return scores, metrics
 
 
@@ -162,8 +263,19 @@ def initialize_fpr_multiplier_from_gradients(
     fixed_tob_threshold,
     baseline_threshold_gev,
     reference_model=None,
+    temperature=None,
 ):
     """Balance initial objective and FPR gradient scales on training batches."""
+    if objective_config.initial_fpr_multiplier_mode == "fixed":
+        return objective_config.initial_fpr_multiplier, {
+            "mode": "fixed",
+            "fixed_fallback": objective_config.initial_fpr_multiplier,
+            "recommended_unclipped": None,
+            "selected": objective_config.initial_fpr_multiplier,
+            "batches_measured": 0,
+            "measurements": [],
+            "reason": "Gradient balancing is disabled by configuration.",
+        }
     parameters = tuple(
         parameter for parameter in model.parameters() if parameter.requires_grad
     )
@@ -181,10 +293,11 @@ def initialize_fpr_multiplier_from_gradients(
             fixed_tob_threshold,
             baseline_threshold_gev,
             reference_model=reference_model,
+            temperature=temperature,
         )
         objective_norm, fpr_norm, cosine = parameter_gradient_pair_statistics(
             metrics.objective,
-            metrics.event_fpr,
+            metrics.violations[0],
             parameters,
             retain_graph=False,
         )
@@ -198,6 +311,9 @@ def initialize_fpr_multiplier_from_gradients(
                 {
                     "soft_objective": float(metrics.objective.detach().cpu()),
                     "soft_event_fpr": float(metrics.event_fpr.detach().cpu()),
+                    "scaled_fpr_violation": float(
+                        metrics.violations[0].detach().cpu()
+                    ),
                     "objective_gradient_norm": objective_value,
                     "fpr_gradient_norm": fpr_value,
                     "gradient_cosine_similarity": float(cosine.detach().cpu()),
@@ -342,7 +458,11 @@ def _hard_violations(hard_metrics, objective_config, device):
     ]
     return torch.tensor(
         [
-            hard_metrics["achieved_fpr"] - objective_config.target_event_fpr,
+            (
+                hard_metrics["achieved_fpr"]
+                - objective_config.target_event_fpr
+            )
+            * objective_config.fpr_violation_scale,
             *region_violations,
         ],
         dtype=torch.float32,
@@ -366,6 +486,15 @@ def _event_model_scores(model, batch):
         batch.features[batch.object_mask]
     ).reshape(-1)
     return scores
+
+
+def _event_model_logits(model, batch):
+    """Evaluate pre-sigmoid logits while preserving padded event structure."""
+    logits = batch.features.new_zeros(batch.object_mask.shape)
+    logits[batch.object_mask] = model.forward_logits(
+        batch.features[batch.object_mask]
+    ).reshape(-1)
+    return logits
 
 
 def run_constrained_training_pipeline(
@@ -393,6 +522,17 @@ def run_constrained_training_pipeline(
         raise ValueError("Classifier and constrained trigger object counts must match")
     if classifier_config.tob_budget is not None:
         raise ValueError("First constrained OR experiments require a fixed TOB budget")
+    if (
+        (
+            objective_config.primal_objective == "tail_ranking"
+            or objective_config.proxy_threshold_mode == "batch_rank"
+        )
+        and classifier_config.name != "nn_only"
+    ):
+        raise ValueError(
+            "The first rank-invariant objective is intentionally NN-only; "
+            "Stage G showed that a positive TOB budget was not beneficial"
+        )
 
     seed = int(config.get("seed", 42))
     dataset = data_cache.get_dataset(
@@ -461,6 +601,10 @@ def run_constrained_training_pipeline(
     )
     reference_constraint_scores = constraint_scores.copy()
     constraint_frame = train_frame.iloc[constraint_rows].copy().reset_index(drop=True)
+    constraint_crossfit_rows = build_constraint_crossfit_rows(
+        constraint_frame,
+        seed=seed + 30_000,
+    )
     background = select_background_objects(constraint_frame)
     background_positions = constraint_frame.index[
         constraint_frame["Type"].isin(["BKG", "Background"])
@@ -507,6 +651,7 @@ def run_constrained_training_pipeline(
         model.parameters(),
         lr=float(config.get("learning_rate", 0.0001)),
     )
+    first_temperature = objective_config.temperature_at(0, int(config.get("epochs", 5)))
     initial_fpr_multiplier, gradient_initialization = (
         initialize_fpr_multiplier_from_gradients(
             model,
@@ -517,13 +662,14 @@ def run_constrained_training_pipeline(
             fixed_tob_threshold,
             baseline_threshold_gev,
             reference_model=reference_model,
+            temperature=first_temperature,
         )
     )
     print(
         "FPR multiplier initialization: "
         f"mode={gradient_initialization['mode']} | "
         f"selected={initial_fpr_multiplier:.6f} | "
-        f"gradient ratio={gradient_initialization['recommended_unclipped']:.6f}"
+        f"gradient ratio={gradient_initialization['recommended_unclipped']}"
     )
     dual_state = DualState(
         multipliers=torch.tensor(
@@ -540,16 +686,17 @@ def run_constrained_training_pipeline(
     )
     bce_monitor = nn.BCELoss()
     epochs = int(config.get("epochs", 5))
+    tail_memory_bank = HardNegativeMemoryBank(
+        objective_config.tail_memory_bank_size
+    )
     history = []
-    initial_constraint = calculate_hard_constraint_metrics(
+    initial_constraint = calculate_cross_fitted_hard_metrics(
         constraint_frame,
         constraint_scores,
+        reference_constraint_scores if reference_model is not None else None,
         classifier_config,
         objective_config,
-        calibration=calibration,
-        baseline_threshold_gev=baseline_threshold_gev,
-        reference_scores=constraint_scores,
-        reference_calibration=calibration,
+        constraint_crossfit_rows,
     )
     initial_validation_scores = _predict_numpy(
         model,
@@ -592,6 +739,13 @@ def run_constrained_training_pipeline(
                     constraint_frame,
                     constraint_scores,
                 ),
+                "regional_gradient_coverage": regional_gradient_diagnostics(
+                    constraint_frame,
+                    constraint_scores,
+                    classifier_config,
+                    objective_config,
+                    first_temperature,
+                ),
             },
         }
     )
@@ -608,10 +762,13 @@ def run_constrained_training_pipeline(
 
     for epoch in range(epochs):
         model.train()
+        temperature = objective_config.temperature_at(epoch, epochs)
         epoch_loss = 0.0
         epoch_bce = 0.0
         epoch_soft_objective = 0.0
         epoch_soft_fpr = 0.0
+        epoch_ranking_loss = 0.0
+        epoch_tail_events = 0.0
         epoch_gradient_norms = None
         batch_count = 0
         for batch in primal_loader:
@@ -626,6 +783,9 @@ def run_constrained_training_pipeline(
                 fixed_tob_threshold,
                 baseline_threshold_gev,
                 reference_model=reference_model,
+                temperature=temperature,
+                tail_memory_bank=tail_memory_bank,
+                update_memory=True,
             )
             if epoch_gradient_norms is None:
                 parameters = tuple(
@@ -636,7 +796,7 @@ def run_constrained_training_pipeline(
                 objective_norm, fpr_norm, gradient_cosine = (
                     parameter_gradient_pair_statistics(
                         metrics.objective,
-                        metrics.event_fpr,
+                        metrics.violations[0],
                         parameters,
                         retain_graph=True,
                     )
@@ -644,6 +804,7 @@ def run_constrained_training_pipeline(
                 epoch_gradient_norms = {
                     "objective": float(objective_norm.detach().cpu()),
                     "event_fpr": float(fpr_norm.detach().cpu()),
+                    "fpr_violation_scale": objective_config.fpr_violation_scale,
                     "weighted_event_fpr": float(
                         dual_state.multipliers[0].detach().cpu()
                         * fpr_norm.detach().cpu()
@@ -662,6 +823,9 @@ def run_constrained_training_pipeline(
             epoch_loss += loss.item()
             epoch_soft_objective += float(metrics.objective.detach().cpu())
             epoch_soft_fpr += float(metrics.event_fpr.detach().cpu())
+            if metrics.ranking_loss is not None:
+                epoch_ranking_loss += float(metrics.ranking_loss.detach().cpu())
+                epoch_tail_events += float(metrics.tail_event_count)
             batch_count += 1
 
         constraint_scores = _predict_numpy(
@@ -670,15 +834,13 @@ def run_constrained_training_pipeline(
             object_batch_size,
             device,
         )
-        hard_constraint = calculate_hard_constraint_metrics(
+        hard_constraint = calculate_cross_fitted_hard_metrics(
             constraint_frame,
             constraint_scores,
+            reference_constraint_scores if reference_model is not None else None,
             classifier_config,
             objective_config,
-            calibration=calibration,
-            baseline_threshold_gev=baseline_threshold_gev,
-            reference_scores=reference_constraint_scores,
-            reference_calibration=calibration,
+            constraint_crossfit_rows,
         )
         hard_violations = _hard_violations(
             hard_constraint,
@@ -727,11 +889,30 @@ def run_constrained_training_pipeline(
                     "event_fpr_mean": float(
                         epoch_soft_fpr / max(batch_count, 1)
                     ),
+                    "ranking_loss_mean": (
+                        None
+                        if objective_config.primal_objective != "tail_ranking"
+                        else float(epoch_ranking_loss / max(batch_count, 1))
+                    ),
+                    "tail_event_count_mean": (
+                        None
+                        if objective_config.primal_objective != "tail_ranking"
+                        else float(epoch_tail_events / max(batch_count, 1))
+                    ),
+                    "temperature": float(temperature),
+                    "memory_bank_size": len(tail_memory_bank),
                 },
                 "gradient_norms_first_batch": epoch_gradient_norms,
                 "score_quantiles": _score_quantiles(
                     constraint_frame,
                     constraint_scores,
+                ),
+                "regional_gradient_coverage": regional_gradient_diagnostics(
+                    constraint_frame,
+                    constraint_scores,
+                    classifier_config,
+                    objective_config,
+                    temperature,
                 ),
             },
         }

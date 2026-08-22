@@ -8,9 +8,12 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from constrained_objective import (
     calculate_soft_constraint_metrics,
+    kth_event_score,
     parse_constrained_objective,
     probability_at_least_k,
+    rank_calibrated_threshold,
     soft_object_pass,
+    tail_ranking_objective,
 )
 
 
@@ -179,6 +182,120 @@ class ConstrainedObjectiveTests(unittest.TestCase):
         )
         self.assertEqual(separate.fpr_dual_learning_rate, 1.0)
         self.assertEqual(separate.region_dual_learning_rate, 50.0)
+
+    def test_objective_and_constraint_regions_are_independent(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "objective_regions_gev": [[25, 32], [32, 40], [40, 60]],
+                    "objective_region_weights": [0.35, 0.35, 0.30],
+                    "constraint_regions_gev": [
+                        [25, 32], [32, 40], [40, 60], [60, 120]
+                    ],
+                    "allowed_deficits": [0.005] * 4,
+                    "minimum_region_advantages": [0.0025, 0.0025, 0.0025, 0.0],
+                }
+            }
+        )
+        self.assertEqual(len(config.objective_regions_gev), 3)
+        self.assertEqual(len(config.constraint_regions_gev), 4)
+        probabilities = torch.tensor(
+            [[0.8, 0.7, 0.6, 0.5]], requires_grad=True
+        )
+        mask = torch.ones_like(probabilities, dtype=torch.bool)
+        metrics = calculate_soft_constraint_metrics(
+            probabilities,
+            mask,
+            mask,
+            torch.tensor([True]),
+            torch.tensor([[28.0, 35.0, 50.0, 80.0]]),
+            torch.zeros_like(mask),
+            config,
+        )
+        self.assertEqual(tuple(metrics.objective_region_deltas.shape), (3,))
+        self.assertEqual(tuple(metrics.region_deltas.shape), (4,))
+        self.assertEqual(tuple(metrics.violations.shape), (5,))
+
+    def test_temperature_schedule_reaches_both_endpoints(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "temperature_start": 0.1,
+                    "temperature_end": 0.02,
+                    "temperature_schedule": "linear",
+                }
+            }
+        )
+        self.assertAlmostEqual(config.temperature_at(0, 10), 0.1)
+        self.assertAlmostEqual(config.temperature_at(9, 10), 0.02)
+
+    def test_rank_threshold_and_tail_loss_ignore_common_logit_shift(self):
+        config = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "primal_objective": "tail_ranking",
+                    "objective_regions_gev": [[25, 60]],
+                    "objective_region_weights": [1.0],
+                    "constraint_regions_gev": [[25, 120]],
+                    "allowed_deficits": [0.005],
+                    "tail_fraction": 0.5,
+                    "tail_min_events": 1,
+                }
+            }
+        )
+        logits = torch.tensor(
+            [[-2.0, -1.0], [-0.5, 0.2], [0.1, 0.8], [1.0, 1.5]],
+            requires_grad=True,
+        )
+        mask = torch.ones_like(logits, dtype=torch.bool)
+        background = torch.tensor([True, True, False, False])
+        signal = torch.tensor(
+            [[False, False], [False, False], [True, True], [True, True]]
+        )
+        truth_pt = torch.tensor(
+            [[0.0, 0.0], [0.0, 0.0], [30.0, 35.0], [45.0, 50.0]]
+        )
+        threshold = rank_calibrated_threshold(
+            logits, mask, background, 0.5, trigger_objects=2
+        )
+        shifted_threshold = rank_calibrated_threshold(
+            logits + 7.0, mask, background, 0.5, trigger_objects=2
+        )
+        self.assertAlmostEqual(
+            float((shifted_threshold - threshold).detach()), 7.0
+        )
+        objective, loss, offsets, tail_count = tail_ranking_objective(
+            logits,
+            mask,
+            signal,
+            background,
+            truth_pt,
+            config,
+        )
+        shifted = tail_ranking_objective(
+            logits + 7.0,
+            mask,
+            signal,
+            background,
+            truth_pt,
+            config,
+        )
+        self.assertAlmostEqual(
+            float(loss.detach()), float(shifted[1].detach()), places=6
+        )
+        self.assertTrue(torch.allclose(offsets, shifted[2]))
+        self.assertEqual(tail_count, 1)
+        self.assertAlmostEqual(float(objective.detach()), -float(loss.detach()))
+
+    def test_kth_event_score_uses_second_largest_object(self):
+        logits = torch.tensor([[0.1, 0.8, 0.3], [1.0, -1.0, 0.5]])
+        mask = torch.tensor([[True, True, True], [True, False, False]])
+        result = kth_event_score(logits, mask, 2)
+        self.assertAlmostEqual(float(result[0]), 0.3)
+        self.assertTrue(torch.isneginf(result[1]))
 
 
 if __name__ == "__main__":
