@@ -1,0 +1,43 @@
+{
+    "epochs": 10,
+    "run_id": "g001_s456",
+    "experiment_name": "TauNet_core_tensors_fraction_constrained_or_b0005",
+    "learning_rate": 0.0001,
+    "batch_size": 2048,
+    "hidden_layers": [32, 16],
+    "features_to_use": ["core_tensors", "em2_best_3x3_fraction"],
+    "seed": 456,
+    "initialization": {
+        "mode": "pretrained",
+        "weights_path": "experiments/nn_only_core_fraction_s456/run_c001_s456_20260819_232614/model_weights.pt"
+    },
+    "classifier": {
+        "name": "tob_nn_or",
+        "target_fpr": 0.005,
+        "trigger_objects": 2,
+        "tob_fpr": 0.0005
+    },
+    "loss": {
+        "name": "constrained_trigger",
+        "temperature": 0.02,
+        "target_event_fpr": 0.005,
+        "trigger_objects": 2,
+        "regions_gev": [[25.0, 40.0], [40.0, 60.0], [60.0, 120.0]],
+        "region_weights": [0.3333333333333333, 0.3333333333333333, 0.3333333333333333],
+        "allowed_deficits": [0.005, 0.005, 0.005],
+        "minimum_region_advantages": [0.0025, 0.0025, 0.0],
+        "reference_model_allowed_deficits": [0.0025, 0.0025, 0.005],
+        "constraint_fraction": 0.3,
+        "fpr_dual_learning_rate": 1.0,
+        "region_dual_learning_rate": 50.0,
+        "dual_update_frequency": 1,
+        "dual_warmup_epochs": 0,
+        "initial_fpr_multiplier_mode": "gradient_balance",
+        "initial_fpr_multiplier": 1.0,
+        "initial_region_multiplier": 0.0,
+        "max_multiplier": 25.0,
+        "event_batch_size": 512,
+        "gradient_balance_batches": 8,
+        "gradient_balance_epsilon": 1e-12
+    }
+}

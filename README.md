@@ -229,6 +229,11 @@ faster energy-price response are under `configs/constrained_stage_d4_nn_s42/`.
 The three-seed NN-only confirmation is split across
 `configs/constrained_stage_f_nn_s42/`, `constrained_stage_f_nn_s123/`, and
 `constrained_stage_f_nn_s456/` so the seeds can run as separate GPU jobs.
+The matching Stage-G OR budget screen is split across
+`configs/constrained_stage_g_or_s42/`, `constrained_stage_g_or_s123/`, and
+`constrained_stage_g_or_s456/`. It trains fixed TOB budgets of 0.05%, 0.10%,
+and 0.15% separately; Stage F is the zero-budget control. Select the budget
+from validation results, not test performance.
 
 The event-FPR multiplier can use the legacy fixed initialization or
 `initial_fpr_multiplier_mode: "gradient_balance"`. Gradient balancing measures
