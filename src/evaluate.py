@@ -567,7 +567,10 @@ def evaluate_experiment(
             },
         }
 
-    if validation_record and "threshold" in validation_record:
+    if validation_record and (
+        "classifier_calibration" in validation_record
+        or "threshold" in validation_record
+    ):
         fixed_calibration = validation_record.get("classifier_calibration")
         if fixed_calibration is None:
             fixed_calibration = {

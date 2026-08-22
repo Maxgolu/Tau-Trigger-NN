@@ -80,7 +80,6 @@ class ThresholdCalibrationTests(unittest.TestCase):
                 "artifacts": {
                     "target_fpr": {
                         "best_validation_record": {
-                            "threshold": float("inf"),
                             "selected_tob_fpr": 0.002,
                             "classifier_calibration": validation_calibration,
                         }
