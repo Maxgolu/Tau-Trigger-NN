@@ -1,4 +1,4 @@
-"""Training-only cross-fitted constraints and constrained-loss diagnostics."""
+"""Cross-fitted hard constraints and constrained-loss diagnostics."""
 
 import math
 
@@ -6,8 +6,13 @@ import numpy as np
 
 from classifiers import calibrate_classifier
 from constrained_objective import (
+    aggregate_paired_sufficient_statistics,
+    build_confidence_feasibility,
+    calibrate_constraint_classifier,
     calculate_hard_constraint_metrics,
     calibrate_tob_baseline,
+    certified_calibration_target,
+    one_sided_binomial_upper_bound,
 )
 from event_data import split_training_events
 from operating_point import (
@@ -18,7 +23,7 @@ from operating_point import (
 
 
 def build_constraint_crossfit_rows(frame, seed):
-    """Create two disjoint event folds inside the training constraint split."""
+    """Create two disjoint, stratified event folds for hard-metric evaluation."""
     first, second = split_training_events(
         frame,
         seed=seed,
@@ -27,21 +32,35 @@ def build_constraint_crossfit_rows(frame, seed):
     return (np.asarray(first, dtype=np.int64), np.asarray(second, dtype=np.int64))
 
 
-def _calibration_for_rows(frame, scores, rows, classifier_config):
+def _calibration_for_rows(
+    frame,
+    scores,
+    rows,
+    classifier_config,
+    objective_config,
+    confidence_level,
+):
     calibration_frame = frame.iloc[rows].copy().reset_index(drop=True)
     calibration_scores = np.asarray(scores, dtype=np.float64)[rows]
     background_mask = calibration_frame["Type"].isin(
         ["BKG", "Background"]
     ).to_numpy()
     background = select_background_objects(calibration_frame)
-    classifier_calibration = calibrate_classifier(
+    classifier_calibration = calibrate_constraint_classifier(
         background,
         calibration_scores[background_mask],
         classifier_config,
+        objective_config,
+        confidence_level_override=confidence_level,
+    )
+    baseline_target_fpr = certified_calibration_target(
+        int(background["eventNumber"].nunique()),
+        objective_config.target_event_fpr,
+        confidence_level,
     )
     baseline_threshold, _ = calibrate_tob_baseline(
         background,
-        classifier_config.target_fpr,
+        baseline_target_fpr,
         classifier_config.trigger_objects,
     )
     return classifier_calibration, baseline_threshold
@@ -138,6 +157,49 @@ def _aggregate_cross_fitted_metrics(folds, objective_config):
         sum(fold["background_event_pass_count"] for fold in folds)
     )
     achieved_fpr = float(background_pass / background_count)
+    baseline_statistics = [
+        aggregate_paired_sufficient_statistics(
+            [
+                fold["paired_region_sufficient_statistics"][
+                    "candidate_minus_baseline"
+                ][index]
+                for fold in folds
+            ]
+        )
+        for index in range(len(objective_config.constraint_regions_gev))
+    ]
+    reference_statistics = [
+        aggregate_paired_sufficient_statistics(
+            [
+                fold["paired_region_sufficient_statistics"][
+                    "candidate_minus_reference"
+                ][index]
+                for fold in folds
+            ]
+        )
+        for index in range(len(objective_config.constraint_regions_gev))
+    ]
+    feasibility = build_confidence_feasibility(
+        objective_config,
+        background_pass,
+        background_count,
+        baseline_statistics,
+        reference_statistics,
+        fpr_upper_override=(
+            None
+            if objective_config.feasibility_confidence_level is None
+            else max(
+                one_sided_binomial_upper_bound(
+                    fold["background_event_pass_count"],
+                    fold["background_event_count"],
+                    1.0
+                    - (1.0 - objective_config.feasibility_confidence_level)
+                    / len(folds),
+                )
+                for fold in folds
+            )
+        ),
+    )
     valid = np.asarray([value is not None for value in deltas])
     margins_array = np.asarray(margins, dtype=np.float64)
     resolutions = [None if not count else 1.0 / count for count in counts]
@@ -165,15 +227,18 @@ def _aggregate_cross_fitted_metrics(folds, objective_config):
             None if resolution is None else float(margin / resolution)
             for margin, resolution in zip(margins_array, resolutions)
         ],
-        "constraints_satisfied": bool(
-            achieved_fpr <= objective_config.target_event_fpr + 1e-12
-            and np.all(margins_array[valid] >= 0.0)
-        ),
+        "constraints_satisfied": feasibility["constraints_satisfied"],
         "minimum_margin": (
             float(np.min(margins_array[valid])) if np.any(valid) else None
         ),
+        "minimum_certified_margin": feasibility["minimum_certified_margin"],
         "background_event_count": background_count,
         "background_event_pass_count": background_pass,
+        "paired_region_sufficient_statistics": {
+            "candidate_minus_baseline": baseline_statistics,
+            "candidate_minus_reference": reference_statistics,
+        },
+        "feasibility": feasibility,
         "cross_fitted": True,
         "folds": folds,
     }
@@ -187,7 +252,7 @@ def calculate_cross_fitted_hard_metrics(
     objective_config,
     fold_rows,
 ):
-    """Calibrate on one training fold and measure exact constraints on the other."""
+    """Calibrate on one fold and measure exact constraints on the other."""
     scores = np.asarray(scores, dtype=np.float64)
     reference_scores = (
         None
@@ -195,17 +260,30 @@ def calculate_cross_fitted_hard_metrics(
         else np.asarray(reference_scores, dtype=np.float64)
     )
     fold_metrics = []
+    fold_confidence_level = objective_config.feasibility_confidence_level
+    if fold_confidence_level is not None:
+        fold_confidence_level = 1.0 - (1.0 - fold_confidence_level) / 2.0
     for calibration_rows, measurement_rows in (
         (fold_rows[0], fold_rows[1]),
         (fold_rows[1], fold_rows[0]),
     ):
         calibration, baseline_threshold = _calibration_for_rows(
-            frame, scores, calibration_rows, classifier_config
+            frame,
+            scores,
+            calibration_rows,
+            classifier_config,
+            objective_config,
+            fold_confidence_level,
         )
         reference_calibration = None
         if reference_scores is not None:
             reference_calibration, _ = _calibration_for_rows(
-                frame, reference_scores, calibration_rows, classifier_config
+                frame,
+                reference_scores,
+                calibration_rows,
+                classifier_config,
+                objective_config,
+                fold_confidence_level,
             )
         measurement_frame = frame.iloc[measurement_rows].copy().reset_index(drop=True)
         fold = calculate_hard_constraint_metrics(

@@ -8,7 +8,10 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from constrained_objective import (
     calculate_soft_constraint_metrics,
+    certified_calibration_target,
     kth_event_score,
+    one_sided_binomial_upper_bound,
+    paired_difference_interval,
     parse_constrained_objective,
     probability_at_least_k,
     rank_calibrated_threshold,
@@ -29,6 +32,54 @@ class ConstrainedObjectiveTests(unittest.TestCase):
                 }
             }
         )
+
+    def test_confidence_configuration_is_explicit_and_validated(self):
+        configured = parse_constrained_objective(
+            {
+                "loss": {
+                    "name": "constrained_trigger",
+                    "validation_crossfit": True,
+                    "feasibility_confidence_level": 0.95,
+                }
+            }
+        )
+        self.assertTrue(configured.validation_crossfit)
+        self.assertEqual(configured.feasibility_confidence_level, 0.95)
+        with self.assertRaises(ValueError):
+            parse_constrained_objective(
+                {
+                    "loss": {
+                        "name": "constrained_trigger",
+                        "feasibility_confidence_level": 0.5,
+                    }
+                }
+            )
+
+    def test_certified_calibration_target_meets_exact_upper_bound(self):
+        event_count = 25_000
+        target = certified_calibration_target(event_count, 0.005, 0.95)
+        accepted = int(round(target * event_count))
+        self.assertLessEqual(
+            one_sided_binomial_upper_bound(accepted, event_count, 0.95),
+            0.005,
+        )
+        self.assertGreater(
+            one_sided_binomial_upper_bound(accepted + 1, event_count, 0.95),
+            0.005,
+        )
+
+    def test_paired_lower_bound_rejects_zero_point_margin(self):
+        statistics = {
+            "cluster_count": 100,
+            "object_count": 100,
+            "difference_sum": 0.0,
+            "difference_square_sum": 20.0,
+            "difference_count_product_sum": 0.0,
+            "count_square_sum": 100.0,
+        }
+        interval = paired_difference_interval(statistics, 0.95)
+        self.assertEqual(interval["estimate"], 0.0)
+        self.assertLess(interval["lower_confidence_bound"], 0.0)
 
     def test_at_least_two_probability_matches_exact_binary_decisions(self):
         probabilities = torch.tensor(

@@ -98,6 +98,47 @@ class ConstrainedTrainingTests(unittest.TestCase):
         self.assertTrue(_is_better_hard_candidate(feasible, infeasible))
         self.assertFalse(_is_better_hard_candidate(infeasible, feasible))
 
+    def test_infeasible_checkpoint_selection_prefers_certified_margin(self):
+        high_objective_large_violation = {
+            "constraints_satisfied": False,
+            "objective_value": 0.9,
+            "minimum_margin": 0.0,
+            "minimum_certified_margin": -0.10,
+            "feasibility": {"mode": "one_sided_confidence"},
+        }
+        lower_objective_small_violation = {
+            "constraints_satisfied": False,
+            "objective_value": 0.1,
+            "minimum_margin": -0.01,
+            "minimum_certified_margin": -0.01,
+            "feasibility": {"mode": "one_sided_confidence"},
+        }
+        self.assertTrue(
+            _is_better_hard_candidate(
+                lower_objective_small_violation,
+                high_objective_large_violation,
+            )
+        )
+        self.assertFalse(
+            _is_better_hard_candidate(
+                high_objective_large_violation,
+                lower_objective_small_violation,
+            )
+        )
+
+    def test_legacy_infeasible_checkpoint_order_remains_objective_first(self):
+        higher_objective = {
+            "constraints_satisfied": False,
+            "objective_value": 0.9,
+            "minimum_margin": -0.10,
+        }
+        safer_objective = {
+            "constraints_satisfied": False,
+            "objective_value": 0.1,
+            "minimum_margin": -0.01,
+        }
+        self.assertTrue(_is_better_hard_candidate(higher_objective, safer_objective))
+
     def test_gradient_norm_does_not_populate_parameter_gradients(self):
         model = torch.nn.Linear(1, 1)
         value = model(torch.ones(2, 1)).sum()
@@ -270,6 +311,7 @@ class ConstrainedTrainingTests(unittest.TestCase):
                     "objective_region_weights": [1.0],
                     "constraint_regions_gev": [[25, 60]],
                     "allowed_deficits": [0.5],
+                    "feasibility_confidence_level": 0.95,
                 }
             }
         )
@@ -295,6 +337,15 @@ class ConstrainedTrainingTests(unittest.TestCase):
         self.assertEqual(metrics["background_event_count"], 8)
         self.assertEqual(metrics["region_counts"], [16])
         self.assertEqual(len(metrics["folds"]), 2)
+        self.assertIn("feasibility", metrics)
+        self.assertIn("paired_region_sufficient_statistics", metrics)
+        self.assertEqual(metrics["feasibility"]["mode"], "one_sided_confidence")
+        self.assertAlmostEqual(
+            metrics["folds"][0]["classifier_calibration"][
+                "feasibility_confidence_level"
+            ],
+            0.975,
+        )
 
 
 if __name__ == "__main__":

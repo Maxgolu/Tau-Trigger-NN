@@ -452,15 +452,28 @@ def _resolve_initial_weights(config, project_root):
 
 
 def _hard_violations(hard_metrics, objective_config, device):
-    region_violations = [
-        0.0 if margin is None else -margin
-        for margin in hard_metrics["constraint_margins"]
-    ]
+    feasibility = hard_metrics.get("feasibility")
+    if (
+        objective_config.feasibility_confidence_level is not None
+        and feasibility is not None
+    ):
+        fpr_value = feasibility["fpr"]["upper_confidence_bound"]
+        region_violations = [
+            0.0
+            if region["certified_margin"] is None
+            else -region["certified_margin"]
+            for region in feasibility["regions"]
+        ]
+    else:
+        fpr_value = hard_metrics["achieved_fpr"]
+        region_violations = [
+            0.0 if margin is None else -margin
+            for margin in hard_metrics["constraint_margins"]
+        ]
     return torch.tensor(
         [
             (
-                hard_metrics["achieved_fpr"]
-                - objective_config.target_event_fpr
+                fpr_value - objective_config.target_event_fpr
             )
             * objective_config.fpr_violation_scale,
             *region_violations,
@@ -475,9 +488,56 @@ def _is_better_hard_candidate(candidate, best):
         return True
     if candidate["constraints_satisfied"] != best["constraints_satisfied"]:
         return candidate["constraints_satisfied"]
+    confidence_mode = (
+        candidate.get("feasibility", {}).get("mode") == "one_sided_confidence"
+        and best.get("feasibility", {}).get("mode") == "one_sided_confidence"
+    )
+    if not candidate["constraints_satisfied"] and confidence_mode:
+        candidate_margin = candidate.get(
+            "minimum_certified_margin", candidate.get("minimum_margin")
+        )
+        best_margin = best.get(
+            "minimum_certified_margin", best.get("minimum_margin")
+        )
+        if candidate_margin is not None and best_margin is not None and not np.isclose(
+            candidate_margin, best_margin
+        ):
+            return candidate_margin > best_margin
     if not np.isclose(candidate["objective_value"], best["objective_value"]):
         return candidate["objective_value"] > best["objective_value"]
-    return candidate["minimum_margin"] > best["minimum_margin"]
+    margin_key = "minimum_certified_margin" if confidence_mode else "minimum_margin"
+    candidate_margin = candidate.get(margin_key)
+    best_margin = best.get(margin_key)
+    if candidate_margin is None or best_margin is None:
+        return False
+    return candidate_margin > best_margin
+
+
+def _calculate_checkpoint_validation(
+    frame,
+    scores,
+    reference_scores,
+    classifier_config,
+    objective_config,
+    fold_rows,
+):
+    """Measure checkpoint fitness with held-out validation calibration folds."""
+    if fold_rows is None:
+        return calculate_hard_constraint_metrics(
+            frame,
+            scores,
+            classifier_config,
+            objective_config,
+            reference_scores=reference_scores,
+        )
+    return calculate_cross_fitted_hard_metrics(
+        frame,
+        scores,
+        reference_scores,
+        classifier_config,
+        objective_config,
+        fold_rows,
+    )
 
 
 def _event_model_scores(model, batch):
@@ -559,6 +619,16 @@ def run_constrained_training_pipeline(
     train_frame = dataset.frame.iloc[split.train].copy().reset_index(drop=True)
     validation_frame = dataset.frame.iloc[split.validation].copy().reset_index(drop=True)
     test_frame = dataset.frame.iloc[split.test].copy().reset_index(drop=True)
+    validation_crossfit_rows = None
+    if objective_config.validation_crossfit:
+        validation_crossfit_rows = build_constraint_crossfit_rows(
+            validation_frame,
+            seed=seed + 40_000,
+        )
+        print(
+            "Validation checkpoint selection: two-fold event cross-fitting "
+            "with disjoint calibration and measurement folds."
+        )
     primal_rows, constraint_rows = split_training_events(
         train_frame,
         seed=seed + 10_000,
@@ -704,12 +774,13 @@ def run_constrained_training_pipeline(
         object_batch_size,
         device,
     )
-    initial_validation = calculate_hard_constraint_metrics(
+    initial_validation = _calculate_checkpoint_validation(
         validation_frame,
+        initial_validation_scores,
         initial_validation_scores,
         classifier_config,
         objective_config,
-        reference_scores=initial_validation_scores,
+        validation_crossfit_rows,
     )
     initial_resolution_warnings = {
         "constraint_training": constraint_resolution_warnings(
@@ -867,12 +938,13 @@ def run_constrained_training_pipeline(
             object_batch_size,
             device,
         )
-        hard_validation = calculate_hard_constraint_metrics(
+        hard_validation = _calculate_checkpoint_validation(
             validation_frame,
             validation_scores,
+            initial_validation_scores,
             classifier_config,
             objective_config,
-            reference_scores=initial_validation_scores,
+            validation_crossfit_rows,
         )
         record = {
             "epoch": epoch + 1,
@@ -935,6 +1007,29 @@ def run_constrained_training_pipeline(
     last_weights_path = Path(tracker.experiment_dir) / "last_epoch_weights.pt"
     torch.save(last_epoch_weights, last_weights_path)
     model.load_state_dict(best_weights)
+    if validation_crossfit_rows is not None:
+        cross_fitted_selection = copy.deepcopy(best_record)
+        selected_validation_scores = _predict_numpy(
+            model,
+            X_val,
+            object_batch_size,
+            device,
+        )
+        final_validation = calculate_hard_constraint_metrics(
+            validation_frame,
+            selected_validation_scores,
+            classifier_config,
+            objective_config,
+            reference_scores=initial_validation_scores,
+        )
+        final_validation["epoch"] = int(cross_fitted_selection["epoch"])
+        final_validation["cross_fitted_selection"] = cross_fitted_selection
+        final_validation["selection_protocol"] = {
+            "validation_crossfit": True,
+            "folds": int(objective_config.crossfit_folds),
+            "final_calibration_split": "complete_validation_after_selection",
+        }
+        best_record = final_validation
     test_scores = _predict_numpy(model, X_test, object_batch_size, device)
     output_frame = test_frame.copy()
     output_frame["nn_score"] = test_scores

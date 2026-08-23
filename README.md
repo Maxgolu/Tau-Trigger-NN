@@ -243,6 +243,13 @@ runs: a rank-calibrated soft-efficiency control, a 5% background-tail ranking
 objective, and the same ranking objective with a centered hard-negative memory
 bank. The three directories can run as independent GPU jobs.
 
+The validation-safe 20-epoch H1 continuation keeps only the rank-calibrated
+soft-efficiency control and is under `configs/constrained_stage_h1_20_s42/`,
+`configs/constrained_stage_h1_20_s123/`, and
+`configs/constrained_stage_h1_20_s456/`. These configs keep all H1 model and
+optimizer settings unchanged, enable validation cross-fitting and 95% one-sided
+feasibility, and change only the training length to 20 epochs.
+
 ### Rank-based constrained objective
 
 New configs separate what should improve from what must remain protected:
@@ -286,6 +293,31 @@ target instead of hiding it at a numerical scale of roughly `1e-3`. Because a
 rank-calibrated proxy makes the soft FPR nearly fixed by construction, Stage H
 does not use the old gradient-balance initialization: its FPR price starts at
 zero and grows only after a held-out training fold violates the hard FPR target.
+
+Checkpoint selection can independently enable
+`validation_crossfit: true`. Validation events are split into two deterministic,
+stratified folds: thresholds are calibrated on A and all FPR/efficiency metrics
+are measured on B, then the roles are swapped and held-out counts are pooled.
+The selected epoch is therefore never measured with a threshold calibrated on
+the same background events. After epoch selection, one deployable threshold is
+calibrated on the complete validation set; `best_validation_record` stores that
+final calibration and embeds the held-out selection result under
+`cross_fitted_selection`.
+
+`feasibility_confidence_level: 0.95` changes feasibility from a point-estimate
+test to a one-sided statistical guard. Calibration uses the largest empirical
+background pass count whose exact Clopper--Pearson upper bound is no greater
+than the configured event-FPR target. Held-out FPR must satisfy the same upper
+bound. Cross-fitted FPR uses a Bonferroni-adjusted bound in each measurement fold
+and requires the worst fold to pass, rather than treating different fold
+thresholds as one binomial sample. Regional guards use event-clustered paired
+standard errors for candidate minus baseline and candidate minus frozen
+reference; their one-sided lower bounds must satisfy the configured minimum
+advantage or allowed deficit. The same certified margins drive hard dual
+updates. If every epoch is infeasible, checkpoint fallback chooses the smallest
+certified violation before objective value, rather than rewarding a
+high-objective but unsafe epoch. Omitting both options preserves the historical
+point-estimate behavior.
 
 Every epoch records, per protected region, a histogram and quantiles of
 `(logit - calibrated_logit_threshold) / temperature`, fractions inside one and

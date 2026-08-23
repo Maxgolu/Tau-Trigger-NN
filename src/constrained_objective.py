@@ -6,6 +6,7 @@ import math
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.stats import beta, norm
 
 from classifiers import (
     calibrate_classifier,
@@ -44,6 +45,8 @@ class ConstrainedObjectiveConfig:
     tail_memory_bank_size: int
     constraint_fraction: float
     crossfit_folds: int
+    validation_crossfit: bool
+    feasibility_confidence_level: float | None
     fpr_violation_scale: float
     fpr_dual_learning_rate: float
     region_dual_learning_rate: float
@@ -112,6 +115,8 @@ class ConstrainedObjectiveConfig:
             "tail_memory_bank_size": self.tail_memory_bank_size,
             "constraint_fraction": self.constraint_fraction,
             "crossfit_folds": self.crossfit_folds,
+            "validation_crossfit": self.validation_crossfit,
+            "feasibility_confidence_level": self.feasibility_confidence_level,
             "fpr_violation_scale": self.fpr_violation_scale,
             "fpr_dual_learning_rate": self.fpr_dual_learning_rate,
             "region_dual_learning_rate": self.region_dual_learning_rate,
@@ -240,6 +245,12 @@ def parse_constrained_objective(config):
         tail_memory_bank_size=int(raw.get("tail_memory_bank_size", 0)),
         constraint_fraction=float(raw.get("constraint_fraction", 0.3)),
         crossfit_folds=int(raw.get("crossfit_folds", 2)),
+        validation_crossfit=bool(raw.get("validation_crossfit", False)),
+        feasibility_confidence_level=(
+            None
+            if raw.get("feasibility_confidence_level") is None
+            else float(raw["feasibility_confidence_level"])
+        ),
         fpr_violation_scale=float(raw.get("fpr_violation_scale", 1.0)),
         fpr_dual_learning_rate=float(
             raw.get("fpr_dual_learning_rate", legacy_dual_learning_rate)
@@ -281,6 +292,11 @@ def parse_constrained_objective(config):
         raise ValueError("constraint_fraction must be in (0, 1)")
     if result.crossfit_folds != 2:
         raise ValueError("Hard constraint cross-fitting currently requires two folds")
+    if (
+        result.feasibility_confidence_level is not None
+        and not 0.5 < result.feasibility_confidence_level < 1.0
+    ):
+        raise ValueError("feasibility_confidence_level must be in (0.5, 1)")
     if result.fpr_violation_scale <= 0.0:
         raise ValueError("fpr_violation_scale must be positive")
     if result.fpr_dual_learning_rate <= 0.0 or result.region_dual_learning_rate <= 0.0:
@@ -622,6 +638,252 @@ def _hard_region_values(truth_pt, passed, comparison, regions):
     return efficiencies, comparisons, counts, pass_counts, comparison_counts
 
 
+def one_sided_binomial_upper_bound(pass_count, event_count, confidence_level):
+    """Return an exact Clopper-Pearson upper bound for a binomial rate."""
+    pass_count = int(pass_count)
+    event_count = int(event_count)
+    if event_count < 1 or not 0 <= pass_count <= event_count:
+        raise ValueError("Binomial counts must satisfy 0 <= pass_count <= event_count")
+    if confidence_level is None:
+        return float(pass_count / event_count)
+    if pass_count == event_count:
+        return 1.0
+    return float(beta.ppf(confidence_level, pass_count + 1, event_count - pass_count))
+
+
+def certified_calibration_target(event_count, target_fpr, confidence_level):
+    """Largest empirical rate whose one-sided upper bound meets target_fpr."""
+    if confidence_level is None:
+        return float(target_fpr)
+    maximum = int(math.floor(float(target_fpr) * int(event_count) + 1e-12))
+    accepted = 0
+    for pass_count in range(maximum + 1):
+        if one_sided_binomial_upper_bound(
+            pass_count, event_count, confidence_level
+        ) <= target_fpr + 1e-15:
+            accepted = pass_count
+        else:
+            break
+    return float(accepted / event_count)
+
+
+def calibrate_constraint_classifier(
+    background,
+    background_scores,
+    classifier_config,
+    objective_config,
+    confidence_level_override=None,
+):
+    """Calibrate at a confidence-safe empirical rate when requested."""
+    event_count = int(background["eventNumber"].nunique())
+    confidence_level = (
+        objective_config.feasibility_confidence_level
+        if confidence_level_override is None
+        else float(confidence_level_override)
+    )
+    empirical_target = certified_calibration_target(
+        event_count,
+        objective_config.target_event_fpr,
+        confidence_level,
+    )
+    calibration = calibrate_classifier(
+        background,
+        background_scores,
+        classifier_config.with_target_fpr(empirical_target),
+    )
+    calibration["nominal_target_fpr"] = float(objective_config.target_event_fpr)
+    calibration["calibration_empirical_target_fpr"] = empirical_target
+    calibration["feasibility_confidence_level"] = confidence_level
+    calibration_pass_count = int(round(calibration["achieved_fpr"] * event_count))
+    calibration_upper = one_sided_binomial_upper_bound(
+        calibration_pass_count,
+        event_count,
+        confidence_level,
+    )
+    calibration["calibration_upper_confidence_bound"] = calibration_upper
+    calibration["calibration_certified"] = bool(
+        calibration_upper <= objective_config.target_event_fpr + 1e-12
+    )
+    return calibration
+
+
+def _paired_sufficient_statistics(event_numbers, candidate_pass, comparison_pass, mask):
+    """Compress event-clustered paired decisions into mergeable moments."""
+    mask = np.asarray(mask, dtype=bool)
+    event_numbers = np.asarray(event_numbers)[mask]
+    differences = (
+        np.asarray(candidate_pass, dtype=np.int8)[mask]
+        - np.asarray(comparison_pass, dtype=np.int8)[mask]
+    ).astype(np.float64)
+    if not len(differences):
+        return None
+    _, inverse = np.unique(event_numbers, return_inverse=True)
+    difference_by_event = np.bincount(inverse, weights=differences)
+    count_by_event = np.bincount(inverse).astype(np.float64)
+    return {
+        "cluster_count": int(len(difference_by_event)),
+        "object_count": int(len(differences)),
+        "difference_sum": float(difference_by_event.sum()),
+        "difference_square_sum": float(np.square(difference_by_event).sum()),
+        "difference_count_product_sum": float(
+            np.sum(difference_by_event * count_by_event)
+        ),
+        "count_square_sum": float(np.square(count_by_event).sum()),
+    }
+
+
+def aggregate_paired_sufficient_statistics(statistics):
+    """Merge paired sufficient statistics from disjoint measurement folds."""
+    populated = [item for item in statistics if item is not None]
+    if not populated:
+        return None
+    keys = (
+        "cluster_count",
+        "object_count",
+        "difference_sum",
+        "difference_square_sum",
+        "difference_count_product_sum",
+        "count_square_sum",
+    )
+    result = {key: sum(item[key] for item in populated) for key in keys}
+    result["cluster_count"] = int(result["cluster_count"])
+    result["object_count"] = int(result["object_count"])
+    return result
+
+
+def paired_difference_interval(statistics, confidence_level):
+    """Estimate a paired efficiency difference with event-clustered uncertainty."""
+    if statistics is None or statistics["object_count"] < 1:
+        return None
+    count = float(statistics["object_count"])
+    clusters = int(statistics["cluster_count"])
+    estimate = float(statistics["difference_sum"] / count)
+    if clusters <= 1:
+        standard_error = None
+        lower = estimate if confidence_level is None else None
+    else:
+        centered_square_sum = (
+            statistics["difference_square_sum"]
+            - 2.0
+            * estimate
+            * statistics["difference_count_product_sum"]
+            + estimate * estimate * statistics["count_square_sum"]
+        )
+        variance = (
+            clusters
+            / (clusters - 1.0)
+            * max(float(centered_square_sum), 0.0)
+            / (count * count)
+        )
+        standard_error = float(math.sqrt(variance))
+        lower = estimate
+        if confidence_level is not None:
+            lower -= float(norm.ppf(confidence_level)) * standard_error
+    return {
+        "estimate": estimate,
+        "standard_error": standard_error,
+        "lower_confidence_bound": None if lower is None else float(lower),
+        "cluster_count": clusters,
+        "object_count": int(count),
+    }
+
+
+def build_confidence_feasibility(
+    objective_config,
+    background_pass_count,
+    background_event_count,
+    baseline_statistics,
+    reference_statistics,
+    fpr_upper_override=None,
+):
+    """Evaluate FPR and paired regional guards at the configured confidence."""
+    confidence_level = objective_config.feasibility_confidence_level
+    fpr_estimate = float(background_pass_count / background_event_count)
+    fpr_upper = (
+        one_sided_binomial_upper_bound(
+            background_pass_count,
+            background_event_count,
+            confidence_level,
+        )
+        if fpr_upper_override is None
+        else float(fpr_upper_override)
+    )
+    fpr_margin = float(objective_config.target_event_fpr - fpr_upper)
+    region_records = []
+    certified_margins = []
+    for index, region in enumerate(objective_config.constraint_regions_gev):
+        baseline_interval = paired_difference_interval(
+            baseline_statistics[index], confidence_level
+        )
+        reference_interval = paired_difference_interval(
+            reference_statistics[index], confidence_level
+        )
+        guards = []
+        if baseline_interval is not None:
+            required = float(objective_config.minimum_region_advantages[index])
+            lower = baseline_interval["lower_confidence_bound"]
+            margin = None if lower is None else float(lower - required)
+            baseline_interval.update(
+                {
+                    "required_minimum": required,
+                    "certified_margin": margin,
+                    "satisfied": bool(margin is not None and margin >= -1e-12),
+                }
+            )
+            guards.append(margin)
+        if reference_interval is not None:
+            required = -float(
+                objective_config.reference_model_allowed_deficits[index]
+            )
+            lower = reference_interval["lower_confidence_bound"]
+            margin = None if lower is None else float(lower - required)
+            reference_interval.update(
+                {
+                    "required_minimum": required,
+                    "certified_margin": margin,
+                    "satisfied": bool(margin is not None and margin >= -1e-12),
+                }
+            )
+            guards.append(margin)
+        populated_guards = [value for value in guards if value is not None]
+        region_margin = min(populated_guards) if populated_guards else None
+        if region_margin is not None:
+            certified_margins.append(region_margin)
+        region_records.append(
+            {
+                "region_gev": list(region),
+                "candidate_minus_baseline": baseline_interval,
+                "candidate_minus_reference": reference_interval,
+                "certified_margin": region_margin,
+                "satisfied": bool(region_margin is not None and region_margin >= -1e-12),
+            }
+        )
+    all_margins = [fpr_margin, *certified_margins]
+    overall_margin = min(all_margins) if all_margins else None
+    return {
+        "mode": (
+            "point" if confidence_level is None else "one_sided_confidence"
+        ),
+        "confidence_level": confidence_level,
+        "fpr": {
+            "estimate": fpr_estimate,
+            "upper_confidence_bound": fpr_upper,
+            "target": float(objective_config.target_event_fpr),
+            "certified_margin": fpr_margin,
+            "satisfied": bool(fpr_margin >= -1e-12),
+        },
+        "regions": region_records,
+        "constraints_satisfied": bool(
+            fpr_margin >= -1e-12
+            and len(region_records) == len(certified_margins)
+            and all(record["satisfied"] for record in region_records)
+        ),
+        "minimum_certified_margin": (
+            None if overall_margin is None else float(overall_margin)
+        ),
+    }
+
+
 def calculate_hard_constraint_metrics(
     frame,
     scores,
@@ -638,15 +900,21 @@ def calculate_hard_constraint_metrics(
     background = select_background_objects(scored)
     signal = select_truth_tau_objects(scored)
     if calibration is None:
-        calibration = calibrate_classifier(
+        calibration = calibrate_constraint_classifier(
             background,
             background["nn_score"].to_numpy(dtype=np.float64),
             classifier_config,
+            objective_config,
         )
     if baseline_threshold_gev is None:
+        baseline_target_fpr = certified_calibration_target(
+            int(background["eventNumber"].nunique()),
+            objective_config.target_event_fpr,
+            objective_config.feasibility_confidence_level,
+        )
         baseline_threshold_gev, _ = calibrate_tob_baseline(
             background,
-            objective_config.target_event_fpr,
+            baseline_target_fpr,
             objective_config.trigger_objects,
         )
 
@@ -661,10 +929,11 @@ def calculate_hard_constraint_metrics(
         reference_background = select_background_objects(reference_scored)
         reference_signal = select_truth_tau_objects(reference_scored)
         if reference_calibration is None:
-            reference_calibration = calibrate_classifier(
+            reference_calibration = calibrate_constraint_classifier(
                 reference_background,
                 reference_background["nn_score"].to_numpy(dtype=np.float64),
                 classifier_config,
+                objective_config,
             )
         reference_pass = classifier_object_pass_mask(
             reference_signal, reference_calibration
@@ -750,6 +1019,36 @@ def calculate_hard_constraint_metrics(
     background_event_count = int(background["eventNumber"].nunique())
     background_event_pass_count = int(np.count_nonzero(event_pass))
     achieved_fpr = float(background_event_pass_count / background_event_count)
+    event_numbers = signal["eventNumber"].to_numpy()
+    baseline_statistics = []
+    reference_statistics = []
+    for low, high in objective_config.constraint_regions_gev:
+        in_region = (truth_pt >= low) & (truth_pt < high)
+        baseline_statistics.append(
+            _paired_sufficient_statistics(
+                event_numbers,
+                signal_pass,
+                baseline_pass,
+                in_region,
+            )
+        )
+        reference_statistics.append(
+            None
+            if reference_pass is None
+            else _paired_sufficient_statistics(
+                event_numbers,
+                signal_pass,
+                reference_pass,
+                in_region,
+            )
+        )
+    feasibility = build_confidence_feasibility(
+        objective_config,
+        background_event_pass_count,
+        background_event_count,
+        baseline_statistics,
+        reference_statistics,
+    )
     return {
         "objective_value": objective,
         "achieved_fpr": achieved_fpr,
@@ -771,15 +1070,18 @@ def calculate_hard_constraint_metrics(
         "region_efficiency_resolutions": resolutions,
         "constraint_margins": margins_array.tolist(),
         "constraint_margins_in_objects": margin_in_objects,
-        "constraints_satisfied": bool(
-            achieved_fpr <= objective_config.target_event_fpr + 1e-12
-            and np.all(margins_array[valid] >= 0.0)
-        ),
+        "constraints_satisfied": feasibility["constraints_satisfied"],
         "minimum_margin": (
             float(np.min(margins_array[valid])) if np.any(valid) else None
         ),
+        "minimum_certified_margin": feasibility["minimum_certified_margin"],
         "background_event_count": background_event_count,
         "background_event_pass_count": background_event_pass_count,
         "classifier_calibration": calibration,
         "baseline_threshold_gev": float(baseline_threshold_gev),
+        "paired_region_sufficient_statistics": {
+            "candidate_minus_baseline": baseline_statistics,
+            "candidate_minus_reference": reference_statistics,
+        },
+        "feasibility": feasibility,
     }
