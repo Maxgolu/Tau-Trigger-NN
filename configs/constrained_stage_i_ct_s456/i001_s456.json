@@ -1,0 +1,111 @@
+{
+  "epochs": 20,
+  "run_id": "i001_s456",
+  "experiment_name": "TauNet_core_tensors_stage_i_generalization",
+  "learning_rate": 0.0001,
+  "batch_size": 2048,
+  "hidden_layers": [
+    32,
+    16
+  ],
+  "features_to_use": [
+    "core_tensors"
+  ],
+  "seed": 456,
+  "initialization": {
+    "mode": "pretrained",
+    "weights_path": "experiments/nn_only_benchmark_s456/run_c002_s456_20260820_003007/model_weights.pt"
+  },
+  "classifier": {
+    "name": "nn_only",
+    "target_fpr": 0.005,
+    "trigger_objects": 2
+  },
+  "loss": {
+    "name": "constrained_trigger",
+    "primal_objective": "soft_efficiency",
+    "proxy_threshold_mode": "batch_rank",
+    "temperature_start": 0.1,
+    "temperature_end": 0.02,
+    "temperature_schedule": "cosine",
+    "target_event_fpr": 0.005,
+    "trigger_objects": 2,
+    "objective_regions_gev": [
+      [
+        25,
+        32
+      ],
+      [
+        32,
+        40
+      ],
+      [
+        40,
+        60
+      ]
+    ],
+    "objective_region_weights": [
+      0.35,
+      0.35,
+      0.3
+    ],
+    "constraint_regions_gev": [
+      [
+        25,
+        32
+      ],
+      [
+        32,
+        40
+      ],
+      [
+        40,
+        60
+      ],
+      [
+        60,
+        120
+      ]
+    ],
+    "allowed_deficits": [
+      0.005,
+      0.005,
+      0.005,
+      0.005
+    ],
+    "minimum_region_advantages": [
+      0.0025,
+      0.0025,
+      0.0025,
+      0
+    ],
+    "reference_model_allowed_deficits": [
+      0.0025,
+      0.0025,
+      0.0025,
+      0.005
+    ],
+    "tail_fraction": 0.05,
+    "tail_temperature": 0.2,
+    "tail_min_events": 16,
+    "tail_memory_bank_size": 0,
+    "constraint_fraction": 0.3,
+    "crossfit_folds": 2,
+    "validation_crossfit": true,
+    "feasibility_confidence_level": 0.95,
+    "fpr_feasibility_mode": "point",
+    "certified_guards_use_allowed_deficits": true,
+    "fpr_violation_scale": 200,
+    "fpr_dual_learning_rate": 1,
+    "region_dual_learning_rate": 50,
+    "dual_update_frequency": 1,
+    "dual_warmup_epochs": 0,
+    "initial_fpr_multiplier_mode": "fixed",
+    "initial_fpr_multiplier": 0,
+    "initial_region_multiplier": 0,
+    "max_multiplier": 25,
+    "event_batch_size": 2048,
+    "gradient_balance_batches": 4,
+    "gradient_balance_epsilon": 1e-12
+  }
+}

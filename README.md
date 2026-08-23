@@ -56,6 +56,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_constrained_objective.py # Trigger-surrogate regression tests
 │   ├── test_constrained_training.py # Primal/dual update regression tests
 │   ├── test_stage_h11_configs.py # Stage H1.1 certification-fix config tests
+│   ├── test_stage_i_configs.py  # Stage I generalization-study config tests
 │   ├── test_event_data.py       # Complete-event batching and leakage tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── slurm/
@@ -271,6 +272,17 @@ certified baseline guard requires the paired lower confidence bound to clear
 saturated regions keep a statistically satisfiable non-inferiority tolerance.
 Configs without these fields keep `"certified"` and `false`, which reproduces
 the previous behavior exactly.
+
+The Stage I generalization study applies the unchanged Stage H1.1 recipe to
+three additional feature sets, one directory per seed and family so every run
+can occupy its own GPU job: `configs/constrained_stage_i_ct_s{42,123,456}/`
+(raw calorimeter cells), `configs/constrained_stage_i_cpct_s{42,123,456}/`
+(cells with core physics), and `configs/constrained_stage_i_sumf_s{42,123,456}/`
+(layer summaries with the EM2 fraction). Each config differs from Stage H1.1
+only in `features_to_use` and in `initialization.weights_path`, which points
+to that family's own best weighted-BCE pretraining from the NN-only benchmark
+(inverse frequency for the cell and summary families, power-law `p=-1` for
+cells with core physics).
 
 ### Rank-based constrained objective
 
