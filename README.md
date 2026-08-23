@@ -55,6 +55,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_losses.py           # Energy-weighted loss and normalization tests
 │   ├── test_constrained_objective.py # Trigger-surrogate regression tests
 │   ├── test_constrained_training.py # Primal/dual update regression tests
+│   ├── test_stage_h11_configs.py # Stage H1.1 certification-fix config tests
 │   ├── test_event_data.py       # Complete-event batching and leakage tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── slurm/
@@ -249,6 +250,27 @@ soft-efficiency control and is under `configs/constrained_stage_h1_20_s42/`,
 `configs/constrained_stage_h1_20_s456/`. These configs keep all H1 model and
 optimizer settings unchanged, enable validation cross-fitting and 95% one-sided
 feasibility, and change only the training length to 20 epochs.
+
+The Stage H1.1 follow-up under `configs/constrained_stage_h11_20_s42/`,
+`configs/constrained_stage_h11_20_s123/`, and
+`configs/constrained_stage_h11_20_s456/` corrects two over-strict
+certification rules found in the H1-20 results. Two new loss fields control
+the corrections and default to the historical behavior when omitted:
+
+```json
+"fpr_feasibility_mode": "point",
+"certified_guards_use_allowed_deficits": true
+```
+
+With `fpr_feasibility_mode: "point"`, checkpoint feasibility uses the measured
+event FPR while the Clopper-Pearson upper bound stays recorded as a
+diagnostic; the FPR budget itself remains protected by the confidence-safe
+calibration target. With `certified_guards_use_allowed_deficits: true`, the
+certified baseline guard requires the paired lower confidence bound to clear
+`minimum advantage - allowed deficit` instead of the raw advantage, so
+saturated regions keep a statistically satisfiable non-inferiority tolerance.
+Configs without these fields keep `"certified"` and `false`, which reproduces
+the previous behavior exactly.
 
 ### Rank-based constrained objective
 

@@ -7,6 +7,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from constrained_objective import (
+    build_confidence_feasibility,
     calculate_soft_constraint_metrics,
     certified_calibration_target,
     kth_event_score,
@@ -347,6 +348,113 @@ class ConstrainedObjectiveTests(unittest.TestCase):
         result = kth_event_score(logits, mask, 2)
         self.assertAlmostEqual(float(result[0]), 0.3)
         self.assertTrue(torch.isneginf(result[1]))
+
+    @staticmethod
+    def _feasibility_config(**extra_loss_fields):
+        loss = {
+            "name": "constrained_trigger",
+            "constraint_regions_gev": [[60, 120]],
+            "objective_regions_gev": [[60, 120]],
+            "objective_region_weights": [1.0],
+            "allowed_deficits": [0.005],
+            "minimum_region_advantages": [0.0],
+            "reference_model_allowed_deficits": [0.005],
+            "feasibility_confidence_level": 0.95,
+        }
+        loss.update(extra_loss_fields)
+        return parse_constrained_objective({"loss": loss})
+
+    @staticmethod
+    def _saturation_region_statistics():
+        # About +0.004 estimated delta with a paired standard error near
+        # 0.0046: certified-positive fails, tolerance-adjusted passes.
+        return {
+            "cluster_count": 1600,
+            "object_count": 1939,
+            "difference_sum": 8.0,
+            "difference_square_sum": 80.0,
+            "difference_count_product_sum": 9.7,
+            "count_square_sum": 2351.0,
+        }
+
+    @staticmethod
+    def _zero_difference_statistics():
+        return {
+            "cluster_count": 1600,
+            "object_count": 1939,
+            "difference_sum": 0.0,
+            "difference_square_sum": 0.0,
+            "difference_count_product_sum": 0.0,
+            "count_square_sum": 2351.0,
+        }
+
+    def test_certified_fpr_veto_remains_the_legacy_default(self):
+        config = self._feasibility_config()
+        self.assertEqual(config.fpr_feasibility_mode, "certified")
+        self.assertFalse(config.certified_guards_use_allowed_deficits)
+        # 119 / 24835 = 0.00479 measured, but its 95% upper bound tops 0.005.
+        feasibility = build_confidence_feasibility(
+            config,
+            119,
+            24_835,
+            [self._zero_difference_statistics()],
+            [self._zero_difference_statistics()],
+        )
+        self.assertFalse(feasibility["fpr"]["satisfied"])
+        self.assertLess(feasibility["fpr"]["certified_margin"], 0.0)
+        self.assertGreater(feasibility["fpr"]["point_margin"], 0.0)
+
+    def test_point_fpr_mode_accepts_measured_rate_below_target(self):
+        config = self._feasibility_config(fpr_feasibility_mode="point")
+        feasibility = build_confidence_feasibility(
+            config,
+            119,
+            24_835,
+            [self._zero_difference_statistics()],
+            [self._zero_difference_statistics()],
+        )
+        self.assertTrue(feasibility["fpr"]["satisfied"])
+        self.assertEqual(feasibility["fpr"]["feasibility_mode"], "point")
+        # The certified bound stays available as a diagnostic.
+        self.assertLess(feasibility["fpr"]["certified_margin"], 0.0)
+        self.assertEqual(
+            feasibility["fpr"]["binding_margin"],
+            feasibility["fpr"]["point_margin"],
+        )
+        self.assertTrue(feasibility["constraints_satisfied"])
+
+    def test_certified_guards_apply_the_configured_tolerance(self):
+        statistics = self._saturation_region_statistics()
+        strict = self._feasibility_config(fpr_feasibility_mode="point")
+        strict_result = build_confidence_feasibility(
+            strict,
+            80,
+            24_835,
+            [statistics],
+            [self._zero_difference_statistics()],
+        )
+        # Without the tolerance the certified lower bound must clear zero,
+        # which a saturated region cannot do at this sample size.
+        self.assertFalse(strict_result["regions"][0]["satisfied"])
+        tolerant = self._feasibility_config(
+            fpr_feasibility_mode="point",
+            certified_guards_use_allowed_deficits=True,
+        )
+        tolerant_result = build_confidence_feasibility(
+            tolerant,
+            80,
+            24_835,
+            [statistics],
+            [self._zero_difference_statistics()],
+        )
+        record = tolerant_result["regions"][0]["candidate_minus_baseline"]
+        self.assertAlmostEqual(record["required_minimum"], -0.005)
+        self.assertTrue(tolerant_result["regions"][0]["satisfied"])
+        self.assertTrue(tolerant_result["constraints_satisfied"])
+
+    def test_invalid_fpr_feasibility_mode_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._feasibility_config(fpr_feasibility_mode="lenient")
 
 
 if __name__ == "__main__":

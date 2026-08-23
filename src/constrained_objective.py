@@ -47,6 +47,8 @@ class ConstrainedObjectiveConfig:
     crossfit_folds: int
     validation_crossfit: bool
     feasibility_confidence_level: float | None
+    fpr_feasibility_mode: str
+    certified_guards_use_allowed_deficits: bool
     fpr_violation_scale: float
     fpr_dual_learning_rate: float
     region_dual_learning_rate: float
@@ -117,6 +119,10 @@ class ConstrainedObjectiveConfig:
             "crossfit_folds": self.crossfit_folds,
             "validation_crossfit": self.validation_crossfit,
             "feasibility_confidence_level": self.feasibility_confidence_level,
+            "fpr_feasibility_mode": self.fpr_feasibility_mode,
+            "certified_guards_use_allowed_deficits": (
+                self.certified_guards_use_allowed_deficits
+            ),
             "fpr_violation_scale": self.fpr_violation_scale,
             "fpr_dual_learning_rate": self.fpr_dual_learning_rate,
             "region_dual_learning_rate": self.region_dual_learning_rate,
@@ -251,6 +257,10 @@ def parse_constrained_objective(config):
             if raw.get("feasibility_confidence_level") is None
             else float(raw["feasibility_confidence_level"])
         ),
+        fpr_feasibility_mode=str(raw.get("fpr_feasibility_mode", "certified")),
+        certified_guards_use_allowed_deficits=bool(
+            raw.get("certified_guards_use_allowed_deficits", False)
+        ),
         fpr_violation_scale=float(raw.get("fpr_violation_scale", 1.0)),
         fpr_dual_learning_rate=float(
             raw.get("fpr_dual_learning_rate", legacy_dual_learning_rate)
@@ -297,6 +307,8 @@ def parse_constrained_objective(config):
         and not 0.5 < result.feasibility_confidence_level < 1.0
     ):
         raise ValueError("feasibility_confidence_level must be in (0.5, 1)")
+    if result.fpr_feasibility_mode not in {"certified", "point"}:
+        raise ValueError("fpr_feasibility_mode must be 'certified' or 'point'")
     if result.fpr_violation_scale <= 0.0:
         raise ValueError("fpr_violation_scale must be positive")
     if result.fpr_dual_learning_rate <= 0.0 or result.region_dual_learning_rate <= 0.0:
@@ -808,7 +820,15 @@ def build_confidence_feasibility(
         if fpr_upper_override is None
         else float(fpr_upper_override)
     )
-    fpr_margin = float(objective_config.target_event_fpr - fpr_upper)
+    fpr_certified_margin = float(objective_config.target_event_fpr - fpr_upper)
+    fpr_point_margin = float(objective_config.target_event_fpr - fpr_estimate)
+    # In point mode the certified bound stays recorded as a diagnostic, while
+    # the binding FPR test uses the measured rate. The FPR budget is instead
+    # protected by the confidence-safe calibration target.
+    if objective_config.fpr_feasibility_mode == "point":
+        fpr_margin = fpr_point_margin
+    else:
+        fpr_margin = fpr_certified_margin
     region_records = []
     certified_margins = []
     for index, region in enumerate(objective_config.constraint_regions_gev):
@@ -821,6 +841,11 @@ def build_confidence_feasibility(
         guards = []
         if baseline_interval is not None:
             required = float(objective_config.minimum_region_advantages[index])
+            if objective_config.certified_guards_use_allowed_deficits:
+                # Certified non-inferiority keeps the configured tolerance:
+                # the lower bound must clear advantage minus allowed deficit,
+                # not the raw advantage, so saturated regions stay satisfiable.
+                required -= float(objective_config.allowed_deficits[index])
             lower = baseline_interval["lower_confidence_bound"]
             margin = None if lower is None else float(lower - required)
             baseline_interval.update(
@@ -869,7 +894,10 @@ def build_confidence_feasibility(
             "estimate": fpr_estimate,
             "upper_confidence_bound": fpr_upper,
             "target": float(objective_config.target_event_fpr),
-            "certified_margin": fpr_margin,
+            "feasibility_mode": objective_config.fpr_feasibility_mode,
+            "certified_margin": fpr_certified_margin,
+            "point_margin": fpr_point_margin,
+            "binding_margin": fpr_margin,
             "satisfied": bool(fpr_margin >= -1e-12),
         },
         "regions": region_records,
