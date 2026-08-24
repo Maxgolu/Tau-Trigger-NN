@@ -569,7 +569,13 @@ dense head. Every architecture choice is config-only:
 
 Layers accept `{"type": "conv", "kernel", "out_channels", "pad"}` and
 `{"type": "pool", "kind": "max"|"avg", "size"}`; changing a kernel or adding a
-layer is a config edit, not a code change. Two model-level fields control
+layer is a config edit, not a code change. A branch with an empty `layers` list
+flattens its (transformed) input unchanged, which reproduces the flat MLP
+architecture on that input. Setting `"include_raw": true` on a branch adds a
+skip connection: the branch's preprocessed columns are concatenated with the
+conv output before the dense head, so the conv path is tested as added
+information rather than a replacement. Multiple branches are supported; each
+names its own feature and shape (e.g. `em2_all_cells` as `[1, 12, 12]`). Two model-level fields control
 training stability: `activation` (`"relu"` default, or `"leaky_relu"`) and
 `batchnorm` (default `false`). On the full, severely imbalanced dataset a plain
 ReLU CNN collapses to a constant output within the first epoch (dead ReLU); a

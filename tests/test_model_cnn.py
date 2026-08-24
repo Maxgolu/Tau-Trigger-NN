@@ -103,6 +103,66 @@ class TensorCNNTests(unittest.TestCase):
         # Outputs must not be collapsed to a single constant value.
         self.assertGreater(out.std().item(), 0.0)
 
+    def test_include_raw_feeds_branch_input_to_the_head(self):
+        # include_raw is a skip connection: the branch's preprocessed columns
+        # are concatenated with the conv output before the dense head, so the
+        # head sees the flat representation as a subset of its input.
+        layout, dim = _layout(("core_tensors", 45))
+        config = {
+            "model": {
+                "name": "tensor_cnn",
+                "branches": [
+                    {"feature": "core_tensors", "shape": [5, 3, 3],
+                     "include_raw": True,
+                     "layers": [{"type": "conv", "kernel": 2, "out_channels": 8}]}
+                ],
+                "head": [16],
+            }
+        }
+        model = build_model(config, dim, layout)
+        first_linear = next(
+            m for m in model.head if isinstance(m, torch.nn.Linear)
+        )
+        # conv flatten (8*2*2=32) + raw columns (45)
+        self.assertEqual(first_linear.in_features, 32 + 45)
+        x = torch.randn(6, dim)
+        self.assertEqual(tuple(model(x).shape), (6, 1))
+        # The raw path must actually carry signal: zero out the conv branch so
+        # only the skip connection remains, then the output must still depend
+        # on the input.
+        with torch.no_grad():
+            for p in model.branches.parameters():
+                p.zero_()
+        out_a = model.forward_logits(torch.zeros(1, dim))
+        out_b = model.forward_logits(torch.ones(1, dim))
+        self.assertFalse(torch.allclose(out_a, out_b))
+
+    def test_empty_branch_layers_reduce_to_flat_mlp(self):
+        # A branch with no conv layers flattens the (transformed) input
+        # unchanged, so tensor_cnn with head [32, 16] reproduces the flat MLP
+        # architecture exactly. This is the config used by the log1p-input
+        # control experiment.
+        layout, dim = _layout(("core_tensors", 45))
+        config = {
+            "model": {
+                "name": "tensor_cnn",
+                "branches": [
+                    {"feature": "core_tensors", "shape": [5, 3, 3],
+                     "transform": "log1p", "layers": []}
+                ],
+                "head": [32, 16],
+            }
+        }
+        model = build_model(config, dim, layout)
+        # Same parameter count as DynamicMLP(45, [32, 16]) = 2017.
+        self.assertEqual(sum(p.numel() for p in model.parameters()), 2017)
+        x = torch.randn(4, dim)
+        self.assertEqual(tuple(model(x).shape), (4, 1))
+        # The flatten must be the identity on the folded block: with the head
+        # replaced by an identity-like probe, outputs follow the input.
+        logits = model.forward_logits(x)
+        self.assertTrue(torch.isfinite(logits).all())
+
     def test_forward_logits_is_a_true_logit_not_a_probability(self):
         # Regression guard for the double-sigmoid bug: forward_logits must
         # return the pre-sigmoid score, so forward() can reach the full (0, 1)

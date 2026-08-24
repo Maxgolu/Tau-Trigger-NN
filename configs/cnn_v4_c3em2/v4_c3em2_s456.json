@@ -1,0 +1,87 @@
+{
+  "epochs": 20,
+  "run_id": "v4_c3em2_s456",
+  "experiment_name": "TauCNNv4_c3em2",
+  "learning_rate": 0.001,
+  "batch_size": 256,
+  "features_to_use": [
+    "core_tensors",
+    "em2_all_cells"
+  ],
+  "seed": 456,
+  "model": {
+    "name": "tensor_cnn",
+    "branches": [
+      {
+        "feature": "core_tensors",
+        "shape": [
+          5,
+          3,
+          3
+        ],
+        "transform": "log1p",
+        "layers": [
+          {
+            "type": "conv",
+            "kernel": 1,
+            "out_channels": 8
+          },
+          {
+            "type": "conv",
+            "kernel": 2,
+            "out_channels": 12
+          }
+        ]
+      },
+      {
+        "feature": "em2_all_cells",
+        "shape": [
+          1,
+          12,
+          12
+        ],
+        "transform": "log1p",
+        "layers": [
+          {
+            "type": "conv",
+            "kernel": 3,
+            "out_channels": 4
+          },
+          {
+            "type": "pool",
+            "kind": "max",
+            "size": 2
+          }
+        ]
+      }
+    ],
+    "head": [
+      16
+    ],
+    "activation": "leaky_relu",
+    "batchnorm": true
+  },
+  "checkpoint_selection": {
+    "methods": [
+      "target_fpr"
+    ],
+    "primary_method": "target_fpr",
+    "target_fpr": 0.005
+  },
+  "classifier": {
+    "name": "nn_only",
+    "target_fpr": 0.005,
+    "trigger_objects": 2
+  },
+  "loss": {
+    "name": "energy_weighted_bce",
+    "weighting": {
+      "profile": "inverse_frequency",
+      "pt_min_gev": 25.0,
+      "pt_max_gev": 100.0,
+      "bin_width_gev": 5.0,
+      "min_weight": 0.2,
+      "max_weight": 5.0
+    }
+  }
+}

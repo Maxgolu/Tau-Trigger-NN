@@ -68,6 +68,7 @@ class TensorCNN(nn.Module):
             # The input transform (e.g. log1p) is applied in preprocessing,
             # before standardization, not here; see train.py. The field is
             # retained on the spec only as documentation of that intent.
+            include_raw = bool(spec.get("include_raw", False))
             self._branch_meta.append(
                 {
                     "name": name,
@@ -75,10 +76,18 @@ class TensorCNN(nn.Module):
                     "length": length,
                     "shape": (channels, height, width),
                     "flatten_dim": out_dim,
+                    "include_raw": include_raw,
                 }
             )
             consumed.add(name)
             flattened_dim += out_dim
+            # include_raw: skip connection. The branch's preprocessed columns
+            # (transform + standardization applied in train.py) are ALSO fed
+            # directly to the dense head, alongside the conv output. The head
+            # input then contains the flat representation as a subset, so the
+            # conv branch is tested as added information, not a replacement.
+            if include_raw:
+                flattened_dim += length
 
         # Every feature not folded into a branch enters the head as a scalar.
         scalar_ranges = [
@@ -150,6 +159,8 @@ class TensorCNN(nn.Module):
             channels, height, width = meta["shape"]
             block = x[:, start:start + length].reshape(-1, channels, height, width)
             parts.append(module(block).reshape(x.shape[0], -1))
+            if meta.get("include_raw", False):
+                parts.append(x[:, start:start + length])
         for start, length in self._scalar_ranges:
             parts.append(x[:, start:start + length])
         combined = torch.cat(parts, dim=1) if len(parts) > 1 else parts[0]
