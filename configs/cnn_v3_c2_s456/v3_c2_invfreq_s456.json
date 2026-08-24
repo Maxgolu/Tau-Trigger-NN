@@ -1,7 +1,7 @@
 {
   "epochs": 20,
-  "run_id": "v2_c1_plaw_s456",
-  "experiment_name": "TauCNNv2_c1_plaw_core_tensors",
+  "run_id": "v3_c2_invfreq_s456",
+  "experiment_name": "TauCNNv3_c2_invfreq_core_tensors",
   "learning_rate": 0.001,
   "batch_size": 256,
   "features_to_use": [
@@ -23,7 +23,7 @@
           {
             "type": "conv",
             "kernel": 2,
-            "out_channels": 8
+            "out_channels": 12
           }
         ]
       }
@@ -49,10 +49,12 @@
   "loss": {
     "name": "energy_weighted_bce",
     "weighting": {
-      "profile": "power_law",
-      "p": -1.0,
-      "pt_clip_min_gev": 10.0,
-      "pt_clip_max_gev": 200.0
+      "profile": "inverse_frequency",
+      "pt_min_gev": 25.0,
+      "pt_max_gev": 100.0,
+      "bin_width_gev": 5.0,
+      "min_weight": 0.2,
+      "max_weight": 5.0
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "epochs": 20,
-  "run_id": "v2_c2_invfreq_s42",
-  "experiment_name": "TauCNNv2_c2_invfreq_core_tensors",
+  "run_id": "v3_c1_invfreq_s42",
+  "experiment_name": "TauCNNv3_c1_invfreq_core_tensors",
   "learning_rate": 0.001,
   "batch_size": 256,
   "features_to_use": [
@@ -23,7 +23,7 @@
           {
             "type": "conv",
             "kernel": 2,
-            "out_channels": 12
+            "out_channels": 8
           }
         ]
       }

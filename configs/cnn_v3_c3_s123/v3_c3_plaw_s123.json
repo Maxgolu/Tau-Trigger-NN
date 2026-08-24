@@ -1,13 +1,13 @@
 {
   "epochs": 20,
-  "run_id": "v2_c2_plaw_s42",
-  "experiment_name": "TauCNNv2_c2_plaw_core_tensors",
+  "run_id": "v3_c3_plaw_s123",
+  "experiment_name": "TauCNNv3_c3_plaw_core_tensors",
   "learning_rate": 0.001,
   "batch_size": 256,
   "features_to_use": [
     "core_tensors"
   ],
-  "seed": 42,
+  "seed": 123,
   "model": {
     "name": "tensor_cnn",
     "branches": [
@@ -20,6 +20,11 @@
         ],
         "transform": "log1p",
         "layers": [
+          {
+            "type": "conv",
+            "kernel": 1,
+            "out_channels": 8
+          },
           {
             "type": "conv",
             "kernel": 2,

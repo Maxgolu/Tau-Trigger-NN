@@ -103,6 +103,53 @@ class TensorCNNTests(unittest.TestCase):
         # Outputs must not be collapsed to a single constant value.
         self.assertGreater(out.std().item(), 0.0)
 
+    def test_forward_logits_is_a_true_logit_not_a_probability(self):
+        # Regression guard for the double-sigmoid bug: forward_logits must
+        # return the pre-sigmoid score, so forward() can reach the full (0, 1)
+        # range. With the bug, forward() was sigmoid(sigmoid(z)), bounded to
+        # (0.5, 0.731), which put a floor of ~0.67 under the training BCE and
+        # starved the gradients.
+        model, dim = self._cnn([{"type": "conv", "kernel": 2, "out_channels": 8}])
+        final_linear = [m for m in model.head
+                        if isinstance(m, torch.nn.Linear)][-1]
+        with torch.no_grad():
+            final_linear.weight.zero_()
+            final_linear.bias.fill_(-5.0)
+        model.eval()
+        with torch.no_grad():
+            x = torch.randn(16, dim)
+            logits = model.forward_logits(x)
+            probs = model(x)
+        # A -5 bias must surface as a -5 logit and a ~0.0067 probability.
+        # The buggy version returned logits == sigmoid(-5) ~ 0.0067 and
+        # probs == sigmoid(0.0067) ~ 0.5017.
+        self.assertTrue(torch.allclose(logits, torch.full_like(logits, -5.0)))
+        self.assertLess(probs.max().item(), 0.01)
+        # And the two interfaces must stay consistent.
+        self.assertTrue(torch.allclose(torch.sigmoid(logits), probs, atol=1e-6))
+
+    def test_forward_can_express_low_probabilities_after_training(self):
+        # On background-dominated data the optimal output for most objects is
+        # far below 0.5. The double-sigmoid bug made that impossible. Train on
+        # all-negative labels and require the mean prediction to fall below the
+        # buggy version's hard floor of 0.5.
+        torch.manual_seed(0)
+        model, dim = self._stabilized_cnn()
+        x = torch.randn(512, dim)
+        y = torch.zeros(512, 1)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+        bce = torch.nn.BCELoss()
+        for _ in range(100):
+            model.train()
+            opt.zero_grad()
+            loss = bce(model(x), y)
+            loss.backward()
+            opt.step()
+        model.eval()
+        with torch.no_grad():
+            preds = model(x)
+        self.assertLess(preds.mean().item(), 0.1)
+
     def test_shape_mismatch_is_rejected(self):
         layout, dim = _layout(("core_tensors", 45))
         bad = {

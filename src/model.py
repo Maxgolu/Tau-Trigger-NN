@@ -153,7 +153,12 @@ class TensorCNN(nn.Module):
         for start, length in self._scalar_ranges:
             parts.append(x[:, start:start + length])
         combined = torch.cat(parts, dim=1) if len(parts) > 1 else parts[0]
-        return self.head(combined)
+        # The head ends with a Sigmoid module (kept for state-dict layout);
+        # slice it off so this returns a true pre-sigmoid logit, exactly like
+        # DynamicMLP.forward_logits. Applying the full head here would make
+        # forward() a double sigmoid, bounding outputs to (0.5, 0.731) and
+        # starving the gradients.
+        return self.head[:-1](combined)
 
 
 def build_model(config, input_dim, feature_layout):
