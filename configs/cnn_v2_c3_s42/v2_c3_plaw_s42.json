@@ -1,13 +1,13 @@
 {
   "epochs": 20,
-  "run_id": "c3_plaw_s456",
-  "experiment_name": "TauCNN_c3_plaw_core_tensors",
+  "run_id": "v2_c3_plaw_s42",
+  "experiment_name": "TauCNNv2_c3_plaw_core_tensors",
   "learning_rate": 0.001,
   "batch_size": 256,
   "features_to_use": [
     "core_tensors"
   ],
-  "seed": 456,
+  "seed": 42,
   "model": {
     "name": "tensor_cnn",
     "branches": [

@@ -23,12 +23,12 @@ class CnnArchitectureConfigTests(unittest.TestCase):
         found = 0
         for arch in ("c1", "c2", "c3"):
             for seed in (42, 123, 456):
-                d = PROJECT_ROOT / "configs" / f"cnn_arch_{arch}_s{seed}"
+                d = PROJECT_ROOT / "configs" / f"cnn_v2_{arch}_s{seed}"
                 self.assertTrue(d.is_dir(), d)
                 files = sorted(p.name for p in d.glob("*.json"))
                 self.assertEqual(
                     files,
-                    [f"{arch}_invfreq_s{seed}.json", f"{arch}_plaw_s{seed}.json"],
+                    [f"v2_{arch}_invfreq_s{seed}.json", f"v2_{arch}_plaw_s{seed}.json"],
                 )
                 for name in files:
                     cfg = json.loads((d / name).read_text())
@@ -59,9 +59,9 @@ class CnnArchitectureConfigTests(unittest.TestCase):
         self.assertEqual(found, 18)
 
     def test_loss_profiles_are_the_two_requested(self):
-        c1 = PROJECT_ROOT / "configs" / "cnn_arch_c1_s42"
-        inv = json.loads((c1 / "c1_invfreq_s42.json").read_text())["loss"]
-        plaw = json.loads((c1 / "c1_plaw_s42.json").read_text())["loss"]
+        c1 = PROJECT_ROOT / "configs" / "cnn_v2_c1_s42"
+        inv = json.loads((c1 / "v2_c1_invfreq_s42.json").read_text())["loss"]
+        plaw = json.loads((c1 / "v2_c1_plaw_s42.json").read_text())["loss"]
         self.assertEqual(inv["weighting"]["profile"], "inverse_frequency")
         self.assertEqual(plaw["weighting"]["profile"], "power_law")
         self.assertEqual(plaw["weighting"]["p"], -1.0)

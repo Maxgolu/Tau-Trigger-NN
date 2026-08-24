@@ -1,7 +1,7 @@
 {
   "epochs": 20,
-  "run_id": "c2_plaw_s456",
-  "experiment_name": "TauCNN_c2_plaw_core_tensors",
+  "run_id": "v2_c1_plaw_s456",
+  "experiment_name": "TauCNNv2_c1_plaw_core_tensors",
   "learning_rate": 0.001,
   "batch_size": 256,
   "features_to_use": [
@@ -23,7 +23,7 @@
           {
             "type": "conv",
             "kernel": 2,
-            "out_channels": 12
+            "out_channels": 8
           }
         ]
       }
