@@ -2,17 +2,6 @@ import torch
 import torch.nn as nn
 
 
-def _apply_transform(values, transform):
-    """Sign-preserving input transforms for convolutional branches."""
-    if transform in (None, "none"):
-        return values
-    if transform == "log1p":
-        # Energies are non-negative; sign() keeps the map well defined even if
-        # a rare cell is slightly negative after upstream processing.
-        return torch.sign(values) * torch.log1p(torch.abs(values))
-    raise ValueError(f"Unknown model input transform: {transform}")
-
-
 class TensorCNN(nn.Module):
     """Configurable CNN over folded calorimeter tensors plus scalar features.
 
@@ -62,13 +51,15 @@ class TensorCNN(nn.Module):
                 channels, height, width, spec.get("layers", [])
             )
             self.branches.append(module)
+            # The input transform (e.g. log1p) is applied in preprocessing,
+            # before standardization, not here; see train.py. The field is
+            # retained on the spec only as documentation of that intent.
             self._branch_meta.append(
                 {
                     "name": name,
                     "start": start,
                     "length": length,
                     "shape": (channels, height, width),
-                    "transform": spec.get("transform", "none"),
                     "flatten_dim": out_dim,
                 }
             )
@@ -136,9 +127,7 @@ class TensorCNN(nn.Module):
         for module, meta in zip(self.branches, self._branch_meta):
             start, length = meta["start"], meta["length"]
             channels, height, width = meta["shape"]
-            block = x[:, start:start + length]
-            block = _apply_transform(block, meta["transform"])
-            block = block.reshape(-1, channels, height, width)
+            block = x[:, start:start + length].reshape(-1, channels, height, width)
             parts.append(module(block).reshape(x.shape[0], -1))
         for start, length in self._scalar_ranges:
             parts.append(x[:, start:start + length])

@@ -91,13 +91,17 @@ class TensorCNNTests(unittest.TestCase):
         out = model(torch.randn(3, dim))
         self.assertEqual(tuple(out.shape), (3, 1))
 
-    def test_log1p_transform_handles_raw_energies(self):
+    def test_model_expects_preprocessed_inputs(self):
+        # The input transform (log1p) and standardization happen in train.py
+        # preprocessing, not in the model. The model consumes standardized
+        # inputs, exactly like DynamicMLP. A standardized batch must produce
+        # finite, non-degenerate outputs.
         model, dim = self._cnn([{"type": "conv", "kernel": 2, "out_channels": 8}])
-        # Raw MeV-scale energies (large, non-negative) must not blow up.
-        x = torch.zeros(2, dim)
-        x[0, :45] = torch.linspace(0.0, 3_000_000.0, 45)
+        x = torch.randn(64, dim)  # already-standardized scale
         out = model(x)
         self.assertTrue(torch.isfinite(out).all())
+        # Outputs must not be collapsed to a single constant value.
+        self.assertGreater(out.std().item(), 0.0)
 
     def test_shape_mismatch_is_rejected(self):
         layout, dim = _layout(("core_tensors", 45))
@@ -118,6 +122,31 @@ class TensorCNNTests(unittest.TestCase):
         model, dim = self._cnn([{"type": "conv", "kernel": 1, "out_channels": 8}])
         out = model(torch.randn(4, dim))
         self.assertEqual(tuple(out.shape), (4, 1))
+
+    def test_cnn_can_learn_on_standardized_inputs(self):
+        # Training-stability guard. The original failure was a dead ReLU: with
+        # unstandardized all-positive inputs the network collapsed to a constant
+        # 0.5 output (BCE = ln 2 = 0.6931) and never recovered. On properly
+        # standardized inputs a few Adam steps must drive BCE well below ln 2.
+        torch.manual_seed(0)
+        model, dim = self._cnn([{"type": "conv", "kernel": 2, "out_channels": 8}])
+        n = 512
+        x = torch.randn(n, dim)
+        # A simple separable signal in the folded image's central cell (EM2
+        # centre = flat index 9*2 + 3*1 + 1 = 22).
+        y = (x[:, 22] > 0).float().unsqueeze(1)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+        bce = torch.nn.BCELoss()
+        first = None
+        for _ in range(150):
+            opt.zero_grad()
+            loss = bce(model(x), y)
+            loss.backward()
+            opt.step()
+            if first is None:
+                first = loss.item()
+        self.assertLess(loss.item(), 0.60)  # below ln 2, i.e. it actually learned
+        self.assertLess(loss.item(), first)
 
 
 if __name__ == "__main__":

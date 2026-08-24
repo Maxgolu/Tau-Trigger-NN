@@ -569,9 +569,14 @@ dense head. Every architecture choice is config-only:
 
 Layers accept `{"type": "conv", "kernel", "out_channels", "pad"}` and
 `{"type": "pool", "kind": "max"|"avg", "size"}`; changing a kernel or adding a
-layer is a config edit, not a code change. `transform: "log1p"` applies a
-sign-preserving `log1p` inside the model; conv-branch feature columns bypass the
-global z-scoring in `train.py` so raw energies reach the transform.
+layer is a config edit, not a code change. `transform: "log1p"` is a
+preprocessing directive read by `train.py`: the branch's raw energies are
+`log1p`-transformed and then standardized, in that order. This order is
+required — standardizing first would feed negative values into `log1p`, and
+skipping standardization feeds all-positive, non-zero-mean inputs into a fresh
+network, which kills the ReLUs on the first optimizer step and collapses the
+output to a constant (BCE = ln 2). The model itself consumes standardized
+inputs only.
 
 ### 4. Classifiers and Losses (`src/classifiers.py`, `src/losses.py`)
 * **Independent configuration:** The final classifier and training loss use separate config sections, so every classifier can be combined with future losses.

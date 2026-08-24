@@ -203,30 +203,38 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         feature_layout.append((name, offset, width))
         offset += width
 
-    # EXACT Normalization from your notebook
+    # Convolutional branches consume raw calorimeter energies whose dynamic
+    # range spans several orders of magnitude. Their configured input transform
+    # (e.g. log1p) is applied here, BEFORE standardization, so that the network
+    # receives centred, unit-variance inputs. Applying log1p after z-scoring
+    # would feed negative values into log1p; skipping standardization entirely
+    # feeds all-positive, non-zero-mean inputs into a fresh network and reliably
+    # kills the ReLUs on the first step. Transform then standardize is the only
+    # stable order. Scalar features are untouched.
+    branch_transforms = {}
+    _model_config = config.get("model")
+    if _model_config is not None and _model_config.get("name", "mlp") == "tensor_cnn":
+        for branch in _model_config.get("branches", []):
+            branch_transforms[branch["feature"]] = branch.get("transform", "none")
+    for name, start, width in feature_layout:
+        transform = branch_transforms.get(name, "none")
+        if transform in ("none", None):
+            continue
+        if transform != "log1p":
+            raise ValueError(f"Unknown branch transform: {transform}")
+        for raw in (X_train_raw, X_val_raw, X_test_raw):
+            block = raw[:, start:start + width]
+            raw[:, start:start + width] = np.sign(block) * np.log1p(np.abs(block))
+    if branch_transforms:
+        print(
+            "Applied branch input transforms before standardization: "
+            f"{ {k: v for k, v in branch_transforms.items() if v not in ('none', None)} }"
+        )
+
+    # EXACT Normalization from your notebook (now on the transformed inputs).
     mean = X_train_raw.mean(axis=0)
     std = X_train_raw.std(axis=0)
     std[std == 0] = 1.0
-
-    # Convolutional branches consume raw calorimeter energies and apply their
-    # own input transform (e.g. log1p) inside the model. Standardizing those
-    # columns first would send negative values into log1p, so they bypass the
-    # global z-scoring (identity: mean 0, std 1). Scalar features are unchanged.
-    raw_branch_features = set()
-    _model_config = config.get("model")
-    if _model_config is not None and _model_config.get("name", "mlp") == "tensor_cnn":
-        raw_branch_features = {
-            branch["feature"] for branch in _model_config.get("branches", [])
-        }
-    if raw_branch_features:
-        for name, start, width in feature_layout:
-            if name in raw_branch_features:
-                mean[start:start + width] = 0.0
-                std[start:start + width] = 1.0
-        print(
-            "Model raw-input branches (bypass standardization): "
-            f"{sorted(raw_branch_features)}"
-        )
 
     X_train_np = (X_train_raw - mean) / std
     X_val_np = (X_val_raw - mean) / std
