@@ -1,0 +1,56 @@
+{
+  "epochs": 20,
+  "run_id": "c2_plaw_s42",
+  "experiment_name": "TauCNN_c2_plaw_core_tensors",
+  "learning_rate": 0.001,
+  "batch_size": 256,
+  "features_to_use": [
+    "core_tensors"
+  ],
+  "seed": 42,
+  "model": {
+    "name": "tensor_cnn",
+    "branches": [
+      {
+        "feature": "core_tensors",
+        "shape": [
+          5,
+          3,
+          3
+        ],
+        "transform": "log1p",
+        "layers": [
+          {
+            "type": "conv",
+            "kernel": 2,
+            "out_channels": 12
+          }
+        ]
+      }
+    ],
+    "head": [
+      16
+    ]
+  },
+  "checkpoint_selection": {
+    "methods": [
+      "target_fpr"
+    ],
+    "primary_method": "target_fpr",
+    "target_fpr": 0.005
+  },
+  "classifier": {
+    "name": "nn_only",
+    "target_fpr": 0.005,
+    "trigger_objects": 2
+  },
+  "loss": {
+    "name": "energy_weighted_bce",
+    "weighting": {
+      "profile": "power_law",
+      "p": -1.0,
+      "pt_clip_min_gev": 10.0,
+      "pt_clip_max_gev": 200.0
+    }
+  }
+}

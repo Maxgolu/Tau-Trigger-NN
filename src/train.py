@@ -11,7 +11,7 @@ import glob
 import copy
 from pathlib import Path
 
-from model import DynamicMLP
+from model import DynamicMLP, build_model
 from classifiers import parse_classifier
 from classifier_selection import (
     build_validation_folds,
@@ -192,10 +192,41 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
         dataset, split.test, feature_names
     )
 
+    # Column layout for the model factory: (name, start, length) per feature,
+    # in the same hstack order as assemble_features.
+    feature_layout = []
+    offset = 0
+    for name in feature_names:
+        width = data_cache.assemble_features(
+            dataset, split.train[:1], [name]
+        ).shape[1]
+        feature_layout.append((name, offset, width))
+        offset += width
+
     # EXACT Normalization from your notebook
     mean = X_train_raw.mean(axis=0)
     std = X_train_raw.std(axis=0)
     std[std == 0] = 1.0
+
+    # Convolutional branches consume raw calorimeter energies and apply their
+    # own input transform (e.g. log1p) inside the model. Standardizing those
+    # columns first would send negative values into log1p, so they bypass the
+    # global z-scoring (identity: mean 0, std 1). Scalar features are unchanged.
+    raw_branch_features = set()
+    _model_config = config.get("model")
+    if _model_config is not None and _model_config.get("name", "mlp") == "tensor_cnn":
+        raw_branch_features = {
+            branch["feature"] for branch in _model_config.get("branches", [])
+        }
+    if raw_branch_features:
+        for name, start, width in feature_layout:
+            if name in raw_branch_features:
+                mean[start:start + width] = 0.0
+                std[start:start + width] = 1.0
+        print(
+            "Model raw-input branches (bypass standardization): "
+            f"{sorted(raw_branch_features)}"
+        )
 
     X_train_np = (X_train_raw - mean) / std
     X_val_np = (X_val_raw - mean) / std
@@ -274,9 +305,10 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
 
-    model = DynamicMLP(
+    model = build_model(
+        config,
         input_dim=X_train_np.shape[1],
-        hidden_layers=config.get("hidden_layers", [32, 16])  # Matches your MLP logic
+        feature_layout=feature_layout,
     ).to(device)
 
     training_criterion = build_loss(loss_config)

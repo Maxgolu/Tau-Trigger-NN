@@ -32,7 +32,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── distributions/           # Modular object/event distribution analysis and split auditing
 │   ├── evaluate.py              # Generates evaluation results for trained neural nets (Fake Rate calculations, binned efficiencies, and Fermi-Dirac fitting)
 │   ├── features.py              # Input parameters feature engineering
-│   ├── model.py                 # PyTorch implementation of the Dynamic MLP
+│   ├── model.py                 # DynamicMLP, configurable TensorCNN, and build_model factory
 │   ├── tracker.py               # Experiment tracking and artifact archiving
 │   ├── training_data.py         # Reusable data loading, alignment, event splitting, and in-memory caching
 │   ├── operating_point.py       # Shared event-level FPR threshold calculations
@@ -58,6 +58,8 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_stage_h11_configs.py # Stage H1.1 certification-fix config tests
 │   ├── test_stage_i_configs.py  # Stage I generalization-study config tests
 │   ├── test_stage_j_configs.py  # Stage J ranking-plus-OR config tests
+│   ├── test_model_cnn.py        # TensorCNN fold, shape, and param-count tests
+│   ├── test_cnn_arch_configs.py # CNN architecture-sweep config tests
 │   ├── test_event_data.py       # Complete-event batching and leakage tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── slurm/
@@ -539,6 +541,37 @@ Each feature is defined as a function that receives a dataframe containing all t
 Classification is handled by `DynamicMLP`, a modular Multi-Layer Perceptron built with `torch.nn`.  
 * The architecture concatenates the requested features into an initial input dimension and constructs the hidden layers dynamically based on the configuration array (e.g., `[32, 16]`).  
 * It utilizes ReLU activations for hidden layers and a final Sigmoid activation for binary classification.  
+
+The model is selected by `build_model`. A config without a `model` block, or with
+`model.name == "mlp"`, reproduces `DynamicMLP` exactly, so every existing config
+is unchanged. Setting `model.name == "tensor_cnn"` selects a configurable CNN
+(`TensorCNN`) with an identical output interface (`forward` returns a
+probability, `forward_logits` the pre-sigmoid score), so training, evaluation,
+and the constrained path consume it without modification.
+
+`tensor_cnn` folds a named feature's contiguous columns back into a
+`(channels, height, width)` image in C-order (matching the registry reshape,
+`tensor_(9L+3r+c)` = layer L, row r, col c for `core_tensors`), applies a
+configured conv/pool stack, flattens (no global pooling, so position is kept),
+and concatenates any feature not consumed by a branch as a scalar before the
+dense head. Every architecture choice is config-only:
+
+```json
+"model": {
+  "name": "tensor_cnn",
+  "branches": [
+    { "feature": "core_tensors", "shape": [5, 3, 3], "transform": "log1p",
+      "layers": [ {"type": "conv", "kernel": 2, "out_channels": 8} ] }
+  ],
+  "head": [16]
+}
+```
+
+Layers accept `{"type": "conv", "kernel", "out_channels", "pad"}` and
+`{"type": "pool", "kind": "max"|"avg", "size"}`; changing a kernel or adding a
+layer is a config edit, not a code change. `transform: "log1p"` applies a
+sign-preserving `log1p` inside the model; conv-branch feature columns bypass the
+global z-scoring in `train.py` so raw energies reach the transform.
 
 ### 4. Classifiers and Losses (`src/classifiers.py`, `src/losses.py`)
 * **Independent configuration:** The final classifier and training loss use separate config sections, so every classifier can be combined with future losses.
