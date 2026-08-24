@@ -57,6 +57,7 @@ The code attempts to utilize CUDA (Nvidia GPU interface) to improve performance.
 │   ├── test_constrained_training.py # Primal/dual update regression tests
 │   ├── test_stage_h11_configs.py # Stage H1.1 certification-fix config tests
 │   ├── test_stage_i_configs.py  # Stage I generalization-study config tests
+│   ├── test_stage_j_configs.py  # Stage J ranking-plus-OR config tests
 │   ├── test_event_data.py       # Complete-event batching and leakage tests
 │   └── test_training_data_cache.py # Cache equivalence, determinism, and leakage regression tests
 ├── slurm/
@@ -272,6 +273,30 @@ certified baseline guard requires the paired lower confidence bound to clear
 saturated regions keep a statistically satisfiable non-inferiority tolerance.
 Configs without these fields keep `"certified"` and `false`, which reproduces
 the previous behavior exactly.
+
+Stage J combines the tail-ranking objective with the TOB comparator through a
+measurement-level budget search. Under rank-calibrated objectives the TOB
+branch never receives gradients, so the budget does not need to be fixed for
+training stationarity: the network trains on the pure NN ranking surrogate,
+while every hard measurement (dual updates, checkpoint selection, and the
+final deployment calibration) evaluates all configured budgets and keeps the
+feasibility-first best. The configuration combines both existing blocks:
+
+```json
+"loss": {"primal_objective": "tail_ranking", ...},
+"classifier": {
+  "name": "tob_nn_or",
+  "tob_budget": {"mode": "validation_search",
+                  "values": [0.0, 0.0005, 0.001, 0.0015, 0.002]}
+}
+```
+
+The selected budget is stored as `selected_tob_fpr` in the checkpoint record,
+which the evaluator already consumes. A fixed `tob_fpr` with a rank-calibrated
+objective is treated as a single-candidate search. Legacy fixed-threshold OR
+training and NN-only configs are unchanged, and a dynamic budget without a
+rank-calibrated objective remains rejected. The three-seed experiment is under
+`configs/constrained_stage_j_rankor_s{42,123,456}/`.
 
 The Stage I generalization study applies the unchanged Stage H1.1 recipe to
 three additional feature sets, one directory per seed and family so every run

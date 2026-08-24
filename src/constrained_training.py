@@ -2,7 +2,7 @@
 
 import copy
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -483,6 +483,77 @@ def _hard_violations(hard_metrics, objective_config, device):
     )
 
 
+def resolve_constrained_or_budget(classifier_config, objective_config):
+    """Return (budget candidates, surrogate classifier) for the OR path.
+
+    Under rank-calibrated objectives the TOB branch never receives gradients,
+    so the budget only affects hard measurements and may be selected there.
+    The differentiable surrogate stays NN-only in that case. Legacy paths
+    (fixed-threshold surrogates) keep their previous behavior exactly.
+    """
+    rank_proxy = (
+        objective_config.primal_objective == "tail_ranking"
+        or objective_config.proxy_threshold_mode == "batch_rank"
+    )
+    if classifier_config.name == "nn_only":
+        if classifier_config.tob_budget is not None:
+            raise ValueError("nn_only cannot carry a TOB budget")
+        return None, classifier_config
+    if not rank_proxy:
+        if classifier_config.tob_budget is not None:
+            raise ValueError(
+                "Dynamic TOB budgets in constrained training require a "
+                "rank-calibrated objective, whose gradients never touch "
+                "the budget"
+            )
+        # Legacy fixed-threshold OR training (Stage E) is unchanged.
+        return None, classifier_config
+    if classifier_config.tob_budget is not None:
+        budget_values = classifier_config.tob_budget.values
+    elif classifier_config.tob_fpr is not None:
+        budget_values = (classifier_config.tob_fpr,)
+    else:
+        raise ValueError("tob_nn_or requires tob_fpr or tob_budget.values")
+    candidates = tuple(
+        classifier_config.with_tob_fpr(value) for value in budget_values
+    )
+    surrogate = replace(
+        classifier_config,
+        name="nn_only",
+        tob_fpr=None,
+        tob_budget=None,
+    )
+    return candidates, surrogate
+
+
+def _budget_candidate_summary(record, budget):
+    return {
+        "tob_fpr": budget,
+        "objective_value": record.get("objective_value"),
+        "constraints_satisfied": record.get("constraints_satisfied"),
+        "minimum_certified_margin": record.get("minimum_certified_margin"),
+        "achieved_fpr": record.get("achieved_fpr"),
+    }
+
+
+def budget_searched_metrics(measure, budget_candidates):
+    """Measure every candidate budget and keep the feasibility-first best."""
+    best = None
+    summaries = []
+    for candidate in budget_candidates:
+        record = measure(candidate)
+        record["selected_tob_fpr"] = candidate.tob_fpr
+        summaries.append(_budget_candidate_summary(record, candidate.tob_fpr))
+        if _is_better_hard_candidate(record, best):
+            best = record
+    best["tob_budget_search"] = {
+        "mode": "validation_search",
+        "selected_tob_fpr": best["selected_tob_fpr"],
+        "candidates": summaries,
+    }
+    return best
+
+
 def _is_better_hard_candidate(candidate, best):
     if best is None:
         return True
@@ -580,18 +651,15 @@ def run_constrained_training_pipeline(
         raise ValueError("Classifier and constrained target FPR must match")
     if classifier_config.trigger_objects != objective_config.trigger_objects:
         raise ValueError("Classifier and constrained trigger object counts must match")
-    if classifier_config.tob_budget is not None:
-        raise ValueError("First constrained OR experiments require a fixed TOB budget")
-    if (
-        (
-            objective_config.primal_objective == "tail_ranking"
-            or objective_config.proxy_threshold_mode == "batch_rank"
-        )
-        and classifier_config.name != "nn_only"
-    ):
-        raise ValueError(
-            "The first rank-invariant objective is intentionally NN-only; "
-            "Stage G showed that a positive TOB budget was not beneficial"
+    budget_candidates, surrogate_classifier = resolve_constrained_or_budget(
+        classifier_config,
+        objective_config,
+    )
+    if budget_candidates is not None:
+        print(
+            "Measurement-level TOB budget search enabled: "
+            f"{[candidate.tob_fpr for candidate in budget_candidates]} | "
+            "surrogate gradients remain NN-only"
         )
 
     seed = int(config.get("seed", 42))
@@ -682,7 +750,7 @@ def run_constrained_training_pipeline(
     calibration = calibrate_classifier(
         background,
         constraint_scores[background_positions],
-        classifier_config,
+        surrogate_classifier,
     )
     baseline_threshold_gev, baseline_fpr = calibrate_tob_baseline(
         background,
@@ -726,7 +794,7 @@ def run_constrained_training_pipeline(
         initialize_fpr_multiplier_from_gradients(
             model,
             (batch.to(device) for batch in balance_loader),
-            classifier_config,
+            surrogate_classifier,
             objective_config,
             fixed_nn_threshold,
             fixed_tob_threshold,
@@ -760,27 +828,45 @@ def run_constrained_training_pipeline(
         objective_config.tail_memory_bank_size
     )
     history = []
-    initial_constraint = calculate_cross_fitted_hard_metrics(
-        constraint_frame,
-        constraint_scores,
-        reference_constraint_scores if reference_model is not None else None,
-        classifier_config,
-        objective_config,
-        constraint_crossfit_rows,
-    )
+
+    def _measure_constraint_split(scores_array):
+        def measure(candidate):
+            return calculate_cross_fitted_hard_metrics(
+                constraint_frame,
+                scores_array,
+                reference_constraint_scores if reference_model is not None else None,
+                candidate,
+                objective_config,
+                constraint_crossfit_rows,
+            )
+        if budget_candidates is None:
+            return measure(classifier_config)
+        return budget_searched_metrics(measure, budget_candidates)
+
+    def _measure_validation(scores_array, reference_scores_array):
+        def measure(candidate):
+            return _calculate_checkpoint_validation(
+                validation_frame,
+                scores_array,
+                reference_scores_array,
+                candidate,
+                objective_config,
+                validation_crossfit_rows,
+            )
+        if budget_candidates is None:
+            return measure(classifier_config)
+        return budget_searched_metrics(measure, budget_candidates)
+
+    initial_constraint = _measure_constraint_split(constraint_scores)
     initial_validation_scores = _predict_numpy(
         model,
         X_val,
         object_batch_size,
         device,
     )
-    initial_validation = _calculate_checkpoint_validation(
-        validation_frame,
+    initial_validation = _measure_validation(
         initial_validation_scores,
         initial_validation_scores,
-        classifier_config,
-        objective_config,
-        validation_crossfit_rows,
     )
     initial_resolution_warnings = {
         "constraint_training": constraint_resolution_warnings(
@@ -813,7 +899,7 @@ def run_constrained_training_pipeline(
                 "regional_gradient_coverage": regional_gradient_diagnostics(
                     constraint_frame,
                     constraint_scores,
-                    classifier_config,
+                    surrogate_classifier,
                     objective_config,
                     first_temperature,
                 ),
@@ -848,7 +934,7 @@ def run_constrained_training_pipeline(
             scores, metrics = _soft_batch_metrics(
                 model,
                 batch,
-                classifier_config,
+                surrogate_classifier,
                 objective_config,
                 fixed_nn_threshold,
                 fixed_tob_threshold,
@@ -905,14 +991,7 @@ def run_constrained_training_pipeline(
             object_batch_size,
             device,
         )
-        hard_constraint = calculate_cross_fitted_hard_metrics(
-            constraint_frame,
-            constraint_scores,
-            reference_constraint_scores if reference_model is not None else None,
-            classifier_config,
-            objective_config,
-            constraint_crossfit_rows,
-        )
+        hard_constraint = _measure_constraint_split(constraint_scores)
         hard_violations = _hard_violations(
             hard_constraint,
             objective_config,
@@ -938,13 +1017,9 @@ def run_constrained_training_pipeline(
             object_batch_size,
             device,
         )
-        hard_validation = _calculate_checkpoint_validation(
-            validation_frame,
+        hard_validation = _measure_validation(
             validation_scores,
             initial_validation_scores,
-            classifier_config,
-            objective_config,
-            validation_crossfit_rows,
         )
         record = {
             "epoch": epoch + 1,
@@ -982,18 +1057,24 @@ def run_constrained_training_pipeline(
                 "regional_gradient_coverage": regional_gradient_diagnostics(
                     constraint_frame,
                     constraint_scores,
-                    classifier_config,
+                    surrogate_classifier,
                     objective_config,
                     temperature,
                 ),
             },
         }
         history.append(record)
+        budget_note = (
+            ""
+            if "selected_tob_fpr" not in hard_validation
+            else f" | b*={hard_validation['selected_tob_fpr']}"
+        )
         print(
             f"Epoch {epoch + 1:02d}/{epochs} - "
             f"Constrained loss: {record['training_loss']:.5f} | "
             f"Val J: {hard_validation['objective_value']:.5f} | "
-            f"feasible={hard_validation['constraints_satisfied']} | "
+            f"feasible={hard_validation['constraints_satisfied']}"
+            f"{budget_note} | "
             f"lambdas={dual_state.to_dict()['multipliers']}"
         )
         if _is_better_hard_candidate(hard_validation, best_record):
@@ -1015,13 +1096,21 @@ def run_constrained_training_pipeline(
             object_batch_size,
             device,
         )
-        final_validation = calculate_hard_constraint_metrics(
-            validation_frame,
-            selected_validation_scores,
-            classifier_config,
-            objective_config,
-            reference_scores=initial_validation_scores,
-        )
+        def _final_measure(candidate):
+            return calculate_hard_constraint_metrics(
+                validation_frame,
+                selected_validation_scores,
+                candidate,
+                objective_config,
+                reference_scores=initial_validation_scores,
+            )
+        if budget_candidates is None:
+            final_validation = _final_measure(classifier_config)
+        else:
+            final_validation = budget_searched_metrics(
+                _final_measure,
+                budget_candidates,
+            )
         final_validation["epoch"] = int(cross_fitted_selection["epoch"])
         final_validation["cross_fitted_selection"] = cross_fitted_selection
         final_validation["selection_protocol"] = {

@@ -17,11 +17,13 @@ from constrained_training import (
     DualState,
     HardNegativeMemoryBank,
     _is_better_hard_candidate,
+    budget_searched_metrics,
     constraint_resolution_warnings,
     constrained_primal_loss,
     initialize_fpr_multiplier_from_gradients,
     parameter_gradient_pair_statistics,
     parameter_gradient_norm,
+    resolve_constrained_or_budget,
     update_dual_state,
 )
 from constrained_validation import (
@@ -346,6 +348,144 @@ class ConstrainedTrainingTests(unittest.TestCase):
             ],
             0.975,
         )
+
+
+class MeasurementBudgetSearchTests(unittest.TestCase):
+    @staticmethod
+    def _configs(classifier, loss_extra=None):
+        loss = {
+            "name": "constrained_trigger",
+            "primal_objective": "tail_ranking",
+            "proxy_threshold_mode": "batch_rank",
+            "objective_regions_gev": [[25, 32], [32, 40], [40, 60]],
+            "objective_region_weights": [0.35, 0.35, 0.3],
+            "constraint_regions_gev": [[25, 32], [32, 40], [40, 60], [60, 120]],
+            "allowed_deficits": [0.005] * 4,
+            "minimum_region_advantages": [0.0025, 0.0025, 0.0025, 0],
+            "reference_model_allowed_deficits": [0.0025, 0.0025, 0.0025, 0.005],
+            "validation_crossfit": True,
+            "feasibility_confidence_level": 0.95,
+            "fpr_feasibility_mode": "point",
+            "certified_guards_use_allowed_deficits": True,
+        }
+        loss.update(loss_extra or {})
+        config = {"loss": loss, "classifier": classifier}
+        from constrained_objective import parse_constrained_objective
+        return parse_classifier(config), parse_constrained_objective(config)
+
+    def test_rank_proxy_or_search_builds_grid_and_nn_only_surrogate(self):
+        classifier, objective = self._configs(
+            {
+                "name": "tob_nn_or",
+                "target_fpr": 0.005,
+                "trigger_objects": 2,
+                "tob_budget": {
+                    "mode": "validation_search",
+                    "values": [0.0, 0.0005, 0.001, 0.0015, 0.002],
+                    "cross_validation_folds": 2,
+                },
+            }
+        )
+        candidates, surrogate = resolve_constrained_or_budget(
+            classifier, objective
+        )
+        self.assertEqual(
+            [candidate.tob_fpr for candidate in candidates],
+            [0.0, 0.0005, 0.001, 0.0015, 0.002],
+        )
+        self.assertEqual(surrogate.name, "nn_only")
+        self.assertIsNone(surrogate.tob_fpr)
+        self.assertIsNone(surrogate.tob_budget)
+
+    def test_rank_proxy_or_fixed_budget_becomes_single_candidate(self):
+        classifier, objective = self._configs(
+            {
+                "name": "tob_nn_or",
+                "target_fpr": 0.005,
+                "trigger_objects": 2,
+                "tob_fpr": 0.001,
+            }
+        )
+        candidates, surrogate = resolve_constrained_or_budget(
+            classifier, objective
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].tob_fpr, 0.001)
+        self.assertEqual(surrogate.name, "nn_only")
+
+    def test_legacy_fixed_threshold_or_is_untouched(self):
+        classifier, objective = self._configs(
+            {
+                "name": "tob_nn_or",
+                "target_fpr": 0.005,
+                "trigger_objects": 2,
+                "tob_fpr": 0.001,
+            },
+            {"primal_objective": "soft_efficiency",
+             "proxy_threshold_mode": "fixed"},
+        )
+        candidates, surrogate = resolve_constrained_or_budget(
+            classifier, objective
+        )
+        self.assertIsNone(candidates)
+        self.assertIs(surrogate, classifier)
+
+    def test_budget_search_rejected_without_rank_proxy(self):
+        classifier, objective = self._configs(
+            {
+                "name": "tob_nn_or",
+                "target_fpr": 0.005,
+                "trigger_objects": 2,
+                "tob_budget": {
+                    "mode": "validation_search",
+                    "values": [0.001],
+                    "cross_validation_folds": 2,
+                },
+            },
+            {"primal_objective": "soft_efficiency",
+             "proxy_threshold_mode": "fixed"},
+        )
+        with self.assertRaises(ValueError):
+            resolve_constrained_or_budget(classifier, objective)
+
+    def test_budget_search_prefers_feasible_over_higher_objective(self):
+        records = {
+            0.0: {
+                "objective_value": 0.30,
+                "constraints_satisfied": False,
+                "minimum_certified_margin": -0.01,
+                "achieved_fpr": 0.004,
+                "feasibility": {"mode": "one_sided_confidence"},
+            },
+            0.001: {
+                "objective_value": 0.25,
+                "constraints_satisfied": True,
+                "minimum_certified_margin": 0.001,
+                "achieved_fpr": 0.004,
+                "feasibility": {"mode": "one_sided_confidence"},
+            },
+            0.002: {
+                "objective_value": 0.27,
+                "constraints_satisfied": True,
+                "minimum_certified_margin": 0.002,
+                "achieved_fpr": 0.004,
+                "feasibility": {"mode": "one_sided_confidence"},
+            },
+        }
+
+        class _Candidate:
+            def __init__(self, budget):
+                self.tob_fpr = budget
+
+        best = budget_searched_metrics(
+            lambda candidate: dict(records[candidate.tob_fpr]),
+            [_Candidate(budget) for budget in (0.0, 0.001, 0.002)],
+        )
+        self.assertEqual(best["selected_tob_fpr"], 0.002)
+        self.assertEqual(
+            best["tob_budget_search"]["selected_tob_fpr"], 0.002
+        )
+        self.assertEqual(len(best["tob_budget_search"]["candidates"]), 3)
 
 
 if __name__ == "__main__":
