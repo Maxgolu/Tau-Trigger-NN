@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import torch
 import random
 import torch.optim as optim
@@ -480,6 +481,16 @@ def run_training_pipeline(config_path, data_dir=DEFAULT_DATA_DIR,
                     f"| feasible={epoch_record['noninferiority_satisfied']}"
                 )
         print(message)
+
+        # Collapse guard: a training loss pinned at ln(2) means the network is
+        # emitting a constant 0.5 for every object (dead units). Flag it early
+        # so a degenerate run is not mistaken for a valid result.
+        if abs(epoch_train_bce - math.log(2.0)) < 1e-3:
+            print(
+                "  !! WARNING: training BCE is stuck at ln(2); the model may "
+                "have collapsed to a constant output (dead units). Check the "
+                "activation / batchnorm / learning-rate settings."
+            )
 
         for method in selection.methods:
             if is_better_checkpoint(method, epoch_record, best_records[method]):

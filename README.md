@@ -569,7 +569,12 @@ dense head. Every architecture choice is config-only:
 
 Layers accept `{"type": "conv", "kernel", "out_channels", "pad"}` and
 `{"type": "pool", "kind": "max"|"avg", "size"}`; changing a kernel or adding a
-layer is a config edit, not a code change. `transform: "log1p"` is a
+layer is a config edit, not a code change. Two model-level fields control
+training stability: `activation` (`"relu"` default, or `"leaky_relu"`) and
+`batchnorm` (default `false`). On the full, severely imbalanced dataset a plain
+ReLU CNN collapses to a constant output within the first epoch (dead ReLU); a
+`conv -> BatchNorm -> LeakyReLU` stack prevents this. Both fold into the
+convolution at inference, so they do not affect the deployment cost. `transform: "log1p"` is a
 preprocessing directive read by `train.py`: the branch's raw energies are
 `log1p`-transformed and then standardized, in that order. This order is
 required — standardizing first would feed negative values into `log1p`, and

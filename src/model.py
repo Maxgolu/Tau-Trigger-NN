@@ -2,6 +2,15 @@ import torch
 import torch.nn as nn
 
 
+def _activation(name):
+    """Return a fresh activation module by name."""
+    if name in (None, "relu"):
+        return nn.ReLU()
+    if name == "leaky_relu":
+        return nn.LeakyReLU(negative_slope=0.01)
+    raise ValueError(f"Unknown activation: {name}")
+
+
 class TensorCNN(nn.Module):
     """Configurable CNN over folded calorimeter tensors plus scalar features.
 
@@ -48,7 +57,12 @@ class TensorCNN(nn.Module):
                     f"provides {length} columns"
                 )
             module, out_dim = self._build_conv_stack(
-                channels, height, width, spec.get("layers", [])
+                channels,
+                height,
+                width,
+                spec.get("layers", []),
+                activation=model_config.get("activation", "relu"),
+                batchnorm=bool(model_config.get("batchnorm", False)),
             )
             self.branches.append(module)
             # The input transform (e.g. log1p) is applied in preprocessing,
@@ -75,18 +89,20 @@ class TensorCNN(nn.Module):
         self._scalar_ranges = sorted(scalar_ranges)
         scalar_dim = sum(length for _, length in self._scalar_ranges)
 
+        activation = model_config.get("activation", "relu")
         head_layers = []
         current = flattened_dim + scalar_dim
         for hidden in model_config.get("head", [16]):
             head_layers.append(nn.Linear(current, int(hidden)))
-            head_layers.append(nn.ReLU())
+            head_layers.append(_activation(activation))
             current = int(hidden)
         head_layers.append(nn.Linear(current, 1))
         head_layers.append(nn.Sigmoid())
         self.head = nn.Sequential(*head_layers)
 
     @staticmethod
-    def _build_conv_stack(channels, height, width, layer_specs):
+    def _build_conv_stack(channels, height, width, layer_specs,
+                          activation="relu", batchnorm=False):
         modules = []
         c, h, w = channels, height, width
         for layer in layer_specs:
@@ -98,7 +114,12 @@ class TensorCNN(nn.Module):
                 modules.append(
                     nn.Conv2d(c, out_channels, kernel_size=kernel, padding=padding)
                 )
-                modules.append(nn.ReLU())
+                # conv -> [BatchNorm] -> activation. BatchNorm stabilizes the
+                # activation scale across the imbalanced full dataset, which
+                # otherwise drives a first-step collapse into dead units.
+                if batchnorm:
+                    modules.append(nn.BatchNorm2d(out_channels))
+                modules.append(_activation(activation))
                 c = out_channels
                 h = h - kernel + 1 + 2 * padding
                 w = w - kernel + 1 + 2 * padding

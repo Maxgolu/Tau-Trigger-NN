@@ -123,30 +123,72 @@ class TensorCNNTests(unittest.TestCase):
         out = model(torch.randn(4, dim))
         self.assertEqual(tuple(out.shape), (4, 1))
 
-    def test_cnn_can_learn_on_standardized_inputs(self):
-        # Training-stability guard. The original failure was a dead ReLU: with
-        # unstandardized all-positive inputs the network collapsed to a constant
-        # 0.5 output (BCE = ln 2 = 0.6931) and never recovered. On properly
-        # standardized inputs a few Adam steps must drive BCE well below ln 2.
+    def _stabilized_cnn(self):
+        # The shipping configuration: LeakyReLU + BatchNorm, which prevent the
+        # dead-ReLU collapse seen on the imbalanced full dataset.
+        layout, dim = _layout(("core_tensors", 45))
+        config = {
+            "model": {
+                "name": "tensor_cnn",
+                "activation": "leaky_relu",
+                "batchnorm": True,
+                "branches": [
+                    {"feature": "core_tensors", "shape": [5, 3, 3],
+                     "layers": [{"type": "conv", "kernel": 2, "out_channels": 8}]}
+                ],
+                "head": [16],
+            }
+        }
+        return build_model(config, dim, layout), dim
+
+    @staticmethod
+    def _imbalanced_sparse_batch(dim, n=4096, positive_rate=0.2, seed=0):
+        # Mirror the real trigger pathology that triggered the collapse:
+        # class imbalance and ~68% sparse (zero) calorimeter cells,
+        # standardized. A plain-ReLU CNN collapses to a constant here; the
+        # stabilized model must still learn. The signal (a raised central EM2
+        # cell for positives) is made clear so a healthy model separates the
+        # classes within the test's step budget.
+        g = torch.Generator().manual_seed(seed)
+        x = torch.randn(n, dim, generator=g)
+        mask = torch.rand(n, dim, generator=g) < 0.68
+        x[mask] = 0.0
+        pos = torch.rand(n, generator=g) < positive_rate
+        x[pos, 22] += 4.0  # central EM2 cell (index 9*2 + 3*1 + 1)
+        y = pos.float().unsqueeze(1)
+        return x, y, pos
+
+    def test_cnn_learns_on_imbalanced_sparse_data(self):
+        # Training-stability regression guard. The original failure was a dead
+        # ReLU on the imbalanced, sparse full dataset: the network collapsed to
+        # a constant output within the first epoch. A balanced, dense synthetic
+        # batch does NOT reproduce it, so this test uses imbalanced + sparse
+        # data, which does.
+        #
+        # BCE is deliberately NOT the success criterion: on imbalanced data BCE
+        # barely moves even when the model learns (the object-vs-trigger
+        # mismatch documented in the report). The criteria are instead that the
+        # output is not collapsed to a constant, and that positives are ranked
+        # above negatives.
         torch.manual_seed(0)
-        model, dim = self._cnn([{"type": "conv", "kernel": 2, "out_channels": 8}])
-        n = 512
-        x = torch.randn(n, dim)
-        # A simple separable signal in the folded image's central cell (EM2
-        # centre = flat index 9*2 + 3*1 + 1 = 22).
-        y = (x[:, 22] > 0).float().unsqueeze(1)
+        model, dim = self._stabilized_cnn()
+        x, y, pos = self._imbalanced_sparse_batch(dim)
         opt = torch.optim.Adam(model.parameters(), lr=1e-2)
         bce = torch.nn.BCELoss()
-        first = None
-        for _ in range(150):
+        for _ in range(300):
+            model.train()
             opt.zero_grad()
             loss = bce(model(x), y)
             loss.backward()
             opt.step()
-            if first is None:
-                first = loss.item()
-        self.assertLess(loss.item(), 0.60)  # below ln 2, i.e. it actually learned
-        self.assertLess(loss.item(), first)
+        model.eval()
+        with torch.no_grad():
+            preds = model(x)
+        # Not collapsed to a constant (the dead-ReLU signature).
+        self.assertGreater(preds.std().item(), 1e-2)
+        # Learned the signal direction: positives ranked above negatives.
+        gap = preds[pos].mean().item() - preds[~pos].mean().item()
+        self.assertGreater(gap, 0.1)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,9 @@
     ],
     "head": [
       16
-    ]
+    ],
+    "activation": "leaky_relu",
+    "batchnorm": true
   },
   "checkpoint_selection": {
     "methods": [

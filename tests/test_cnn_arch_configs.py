@@ -13,7 +13,9 @@ from losses import parse_loss
 from model import TensorCNN, build_model
 
 
-EXPECTED_PARAMS = {"c1": 713, "c2": 1053, "c3": 1245}
+# Parameter counts include BatchNorm affine params (2 per conv output channel):
+# c1 = 713 + 16, c2 = 1053 + 24, c3 = 1245 + 40.
+EXPECTED_PARAMS = {"c1": 729, "c2": 1077, "c3": 1285}
 
 
 class CnnArchitectureConfigTests(unittest.TestCase):
@@ -40,6 +42,10 @@ class CnnArchitectureConfigTests(unittest.TestCase):
                     self.assertEqual(branch["feature"], "core_tensors")
                     self.assertEqual(branch["shape"], [5, 3, 3])
                     self.assertEqual(branch["transform"], "log1p")
+                    # Training-stability options against the imbalanced-data
+                    # dead-ReLU collapse.
+                    self.assertEqual(cfg["model"]["activation"], "leaky_relu")
+                    self.assertTrue(cfg["model"]["batchnorm"])
                     # Build the model from the config and check the param count.
                     model = build_model(cfg, 45, [("core_tensors", 0, 45)])
                     self.assertIsInstance(model, TensorCNN)
