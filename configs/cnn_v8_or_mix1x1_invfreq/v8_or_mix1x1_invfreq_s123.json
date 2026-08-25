@@ -1,0 +1,86 @@
+{
+  "epochs": 20,
+  "run_id": "v8_or_mix1x1_invfreq_s123",
+  "experiment_name": "TauCNNv8_or_mix1x1_invfreq_frac",
+  "learning_rate": 0.001,
+  "batch_size": 256,
+  "features_to_use": [
+    "core_tensors",
+    "em2_best_3x3_fraction"
+  ],
+  "seed": 123,
+  "model": {
+    "name": "tensor_cnn",
+    "branches": [
+      {
+        "feature": "core_tensors",
+        "shape": [
+          5,
+          3,
+          3
+        ],
+        "transform": "none",
+        "layers": [
+          {
+            "type": "conv",
+            "kernel": 1,
+            "out_channels": 12
+          }
+        ]
+      }
+    ],
+    "head": [
+      32,
+      16
+    ],
+    "activation": "leaky_relu",
+    "batchnorm": true
+  },
+  "checkpoint_selection": {
+    "methods": [
+      "target_fpr"
+    ],
+    "primary_method": "target_fpr",
+    "target_fpr": 0.005
+  },
+  "classifier": {
+    "name": "tob_nn_or",
+    "target_fpr": 0.005,
+    "trigger_objects": 2,
+    "tob_budget": {
+      "mode": "validation_search",
+      "values": [
+        0.0,
+        0.0005,
+        0.001,
+        0.0015,
+        0.002,
+        0.0025,
+        0.003,
+        0.0035,
+        0.004,
+        0.0045,
+        0.005
+      ],
+      "cross_validation_folds": 2,
+      "objective": {
+        "min_truth_pt_gev": 25.0,
+        "objective_max_truth_pt_gev": 100.0,
+        "window_width_gev": 5.0,
+        "noninferiority_tolerance": 0.005,
+        "objective_tie_tolerance": 0.002
+      }
+    }
+  },
+  "loss": {
+    "name": "energy_weighted_bce",
+    "weighting": {
+      "profile": "inverse_frequency",
+      "pt_min_gev": 25.0,
+      "pt_max_gev": 100.0,
+      "bin_width_gev": 5.0,
+      "min_weight": 0.2,
+      "max_weight": 5.0
+    }
+  }
+}

@@ -31,9 +31,31 @@ from event_data import (
     collate_events,
     split_training_events,
 )
-from model import DynamicMLP
+from model import DynamicMLP, build_model
 from operating_point import select_background_objects
 from tracker import ExperimentTracker
+
+
+def _build_constrained_model(config, input_dim, feature_layout, device):
+    """Build the configured model (legacy MLP or tensor_cnn) for fine-tuning.
+
+    The constrained pipeline standardizes features with plain per-column
+    z-scoring and applies no branch input transforms, so a tensor_cnn config
+    is only accepted when every branch declares transform "none" (or omits
+    it as documentation). Otherwise the pretrained weights would have been
+    fitted on differently preprocessed inputs.
+    """
+    model_config = config.get("model")
+    if model_config is not None and model_config.get("name") == "tensor_cnn":
+        for branch in model_config.get("branches", []):
+            transform = branch.get("transform", "none")
+            if transform not in ("none", None):
+                raise ValueError(
+                    "Constrained fine-tuning supports only transform 'none' "
+                    f"branches; branch '{branch.get('feature')}' declares "
+                    f"'{transform}'"
+                )
+    return build_model(config, input_dim, feature_layout).to(device)
 
 
 @dataclass
@@ -708,10 +730,20 @@ def run_constrained_training_pipeline(
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DynamicMLP(
-        input_dim=X_train.shape[1],
-        hidden_layers=config.get("hidden_layers", [32, 16]),
-    ).to(device)
+    # Column layout for the model factory, matching the assemble_features
+    # hstack order (same construction as train.py). Configs without a model
+    # block still build the legacy DynamicMLP through the factory.
+    feature_layout = []
+    offset = 0
+    for name in feature_names:
+        width = data_cache.assemble_features(
+            dataset, split.train[:1], [name]
+        ).shape[1]
+        feature_layout.append((name, offset, width))
+        offset += width
+    model = _build_constrained_model(
+        config, X_train.shape[1], feature_layout, device
+    )
     weights_path = _resolve_initial_weights(config, project_root)
     try:
         initial_state = torch.load(
