@@ -46,8 +46,10 @@ class TensorCNN(nn.Module):
                 raise ValueError(
                     f"Branch feature '{name}' is not in features_to_use"
                 )
-            if name in consumed:
-                raise ValueError(f"Feature '{name}' used by two branches")
+            # A feature may feed several parallel branches (e.g. a 1x1
+            # layer-mixing branch and a 2x2 spatial branch on the same
+            # tensor); each branch slices the same columns independently.
+            # 'consumed' only controls scalar passthrough below.
             start, length = layout[name]
             channels, height, width = (int(v) for v in spec["shape"])
             if channels * height * width != length:

@@ -163,6 +163,31 @@ class TensorCNNTests(unittest.TestCase):
         logits = model.forward_logits(x)
         self.assertTrue(torch.isfinite(logits).all())
 
+    def test_two_parallel_branches_can_share_one_feature(self):
+        # A 1x1 layer-mixing branch and a 2x2 spatial branch may both read
+        # core_tensors; the head sees the concatenation of both flattens.
+        layout, dim = _layout(("core_tensors", 45))
+        config = {
+            "model": {
+                "name": "tensor_cnn",
+                "branches": [
+                    {"feature": "core_tensors", "shape": [5, 3, 3],
+                     "layers": [{"type": "conv", "kernel": 1, "out_channels": 12}]},
+                    {"feature": "core_tensors", "shape": [5, 3, 3],
+                     "layers": [{"type": "conv", "kernel": 2, "out_channels": 12}]},
+                ],
+                "head": [32, 16],
+            }
+        }
+        model = build_model(config, dim, layout)
+        first_linear = next(
+            m for m in model.head if isinstance(m, torch.nn.Linear)
+        )
+        # 12*3*3 (1x1 branch) + 12*2*2 (2x2 branch)
+        self.assertEqual(first_linear.in_features, 108 + 48)
+        out = model(torch.randn(6, dim))
+        self.assertEqual(tuple(out.shape), (6, 1))
+
     def test_forward_logits_is_a_true_logit_not_a_probability(self):
         # Regression guard for the double-sigmoid bug: forward_logits must
         # return the pre-sigmoid score, so forward() can reach the full (0, 1)
