@@ -122,8 +122,10 @@ class TensorCNN(nn.Module):
                 kernel = int(layer["kernel"])
                 out_channels = int(layer["out_channels"])
                 padding = int(layer.get("pad", 0))
+                stride = int(layer.get("stride", 1))
                 modules.append(
-                    nn.Conv2d(c, out_channels, kernel_size=kernel, padding=padding)
+                    nn.Conv2d(c, out_channels, kernel_size=kernel,
+                              padding=padding, stride=stride)
                 )
                 # conv -> [BatchNorm] -> activation. BatchNorm stabilizes the
                 # activation scale across the imbalanced full dataset, which
@@ -132,8 +134,9 @@ class TensorCNN(nn.Module):
                     modules.append(nn.BatchNorm2d(out_channels))
                 modules.append(_activation(activation))
                 c = out_channels
-                h = h - kernel + 1 + 2 * padding
-                w = w - kernel + 1 + 2 * padding
+                # For stride 1 this reduces to the legacy h - kernel + 1 + 2p.
+                h = (h - kernel + 2 * padding) // stride + 1
+                w = (w - kernel + 2 * padding) // stride + 1
             elif kind == "pool":
                 size = int(layer.get("size", 2))
                 if layer.get("kind", "max") == "max":

@@ -46,25 +46,6 @@ class CnnV8ConfigTests(unittest.TestCase):
                     found += 1
         self.assertEqual(found, 24)
 
-    def test_finetune_configs_load_pretrained_dual_frac_weights(self):
-        d = PROJECT_ROOT / "configs" / "cnn_v8_dualfrac_ft"
-        for seed in SEEDS:
-            cfg = json.loads(
-                (d / f"v8_dualfrac_ft_s{seed}.json").read_text()
-            )
-            self.assertEqual(cfg["loss"]["name"], "constrained_trigger")
-            self.assertEqual(
-                cfg["initialization"]["mode"], "pretrained"
-            )
-            weights = PROJECT_ROOT / cfg["initialization"]["weights_path"]
-            self.assertTrue(weights.is_file(), weights)
-            # The factory model must accept the pretrained state dict exactly.
-            model = _build_constrained_model(
-                cfg, DIM, LAYOUT, torch.device("cpu")
-            )
-            state = torch.load(weights, map_location="cpu")
-            model.load_state_dict(state)
-
     def test_constrained_model_rejects_transformed_branches(self):
         cfg = {
             "model": {

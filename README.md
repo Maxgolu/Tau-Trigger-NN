@@ -567,7 +567,7 @@ dense head. Every architecture choice is config-only:
 }
 ```
 
-Layers accept `{"type": "conv", "kernel", "out_channels", "pad"}` and
+Layers accept `{"type": "conv", "kernel", "out_channels", "pad", "stride"}` and
 `{"type": "pool", "kind": "max"|"avg", "size"}`; changing a kernel or adding a
 layer is a config edit, not a code change. A branch with an empty `layers` list
 flattens its (transformed) input unchanged, which reproduces the flat MLP

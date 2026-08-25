@@ -1,14 +1,14 @@
 {
   "epochs": 20,
-  "run_id": "v8_dualfrac_ft_s123",
-  "experiment_name": "TauCNNv8_dualfrac_constrained_ft",
+  "run_id": "v9_dualfrac_ft2_s456",
+  "experiment_name": "TauCNNv9_dualfrac_constrained_ft2",
   "learning_rate": 0.0001,
   "batch_size": 2048,
   "features_to_use": [
     "core_tensors",
     "em2_best_3x3_fraction"
   ],
-  "seed": 123,
+  "seed": 456,
   "model": {
     "name": "tensor_cnn",
     "branches": [
@@ -54,7 +54,7 @@
   },
   "initialization": {
     "mode": "pretrained",
-    "weights_path": "experiments/cnn_v7_gpu07/run_v7_dual_frac_s123_20260825_194240/model_weights.pt"
+    "weights_path": "experiments/cnn_v7_gpu08/run_v7_dual_frac_s456_20260825_194157/model_weights.pt"
   },
   "classifier": {
     "name": "nn_only",

@@ -163,6 +163,32 @@ class TensorCNNTests(unittest.TestCase):
         logits = model.forward_logits(x)
         self.assertTrue(torch.isfinite(logits).all())
 
+    def test_strided_conv_shape_arithmetic(self):
+        # stride support: conv 3x3 stride 2 on a 12x12 image gives 5x5, and a
+        # following 3x3 conv gives 3x3. With 8 channels the flatten is 72.
+        layout, dim = _layout(("em2_all_cells", 144))
+        config = {
+            "model": {
+                "name": "tensor_cnn",
+                "branches": [
+                    {"feature": "em2_all_cells", "shape": [1, 12, 12],
+                     "layers": [
+                         {"type": "conv", "kernel": 3, "out_channels": 8,
+                          "stride": 2},
+                         {"type": "conv", "kernel": 3, "out_channels": 8},
+                     ]}
+                ],
+                "head": [16],
+            }
+        }
+        model = build_model(config, dim, layout)
+        first_linear = next(
+            m for m in model.head if isinstance(m, torch.nn.Linear)
+        )
+        self.assertEqual(first_linear.in_features, 72)
+        out = model(torch.randn(3, dim))
+        self.assertEqual(tuple(out.shape), (3, 1))
+
     def test_two_parallel_branches_can_share_one_feature(self):
         # A 1x1 layer-mixing branch and a 2x2 spatial branch may both read
         # core_tensors; the head sees the concatenation of both flattens.

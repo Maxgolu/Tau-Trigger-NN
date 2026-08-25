@@ -461,7 +461,6 @@ def _resolve_initial_weights(config, project_root):
             source_config = json.load(handle)
         checks = (
             ("features_to_use", config.get("features_to_use")),
-            ("hidden_layers", config.get("hidden_layers", [32, 16])),
             ("seed", int(config.get("seed", 42))),
         )
         for key, expected in checks:
@@ -470,6 +469,24 @@ def _resolve_initial_weights(config, project_root):
                     f"Pretrained {key} does not match constrained config; "
                     "this would invalidate the saved normalization or architecture"
                 )
+        # Architecture compatibility. tensor_cnn configs describe the
+        # architecture in a "model" block; legacy MLP configs use
+        # "hidden_layers". Compare whichever representation applies, so a
+        # tensor_cnn checkpoint is accepted by an identical tensor_cnn
+        # config and never silently mixed with an MLP (or a different CNN).
+        if (config.get("model") is not None
+                or source_config.get("model") is not None):
+            if source_config.get("model") != config.get("model"):
+                raise ValueError(
+                    "Pretrained model block does not match constrained "
+                    "config; this would invalidate the saved architecture"
+                )
+        elif (source_config.get("hidden_layers")
+                != config.get("hidden_layers", [32, 16])):
+            raise ValueError(
+                "Pretrained hidden_layers does not match constrained config; "
+                "this would invalidate the saved normalization or architecture"
+            )
     return path
 
 
