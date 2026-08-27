@@ -505,6 +505,30 @@ python src/evaluate.py --experiments_dir experiments/batch_name \
 Hybrid evaluation saves two turn-on plots: the configured classifier against
 the TOB baseline, and a separate branch diagnostic showing NN and TOB branches.
 
+### External evaluation datasets (`src/prepare_external_data.py`, `src/evaluate_external.py`)
+
+Trained runs can be evaluated on an independent dataset without touching the
+default training workflow. `prepare_external_data.py` merges one or more
+production case directories into a new `data_dir` with the standard layout
+(`Signal/signal_combined.*`, `Background/bkg_combined.*`); event numbers are
+shifted onto disjoint ranges per case (they repeat between campaigns), and a
+`case` column records each object's provenance for per-case breakdowns.
+`evaluate_external.py` then loads a finished run, refits the branch
+transforms and per-column standardization on the run's ORIGINAL training
+split (never on the external data), predicts on every external object, and
+evaluates with the standard machinery into `<run_dir>/external_<tag>/`
+(thresholds and the `tob_pt` baseline are recalibrated on the external
+background). A config without these tools behaves exactly as before; nothing
+in the training path changes.
+
+```bash
+python src/prepare_external_data.py \
+    --signal_cases signal_new/case_603276 signal_new/case_603422 signal_new/case_801002 \
+    --background_cases bkgr_new/case_801165 bkgr_new/case_801166 bkgr_new/case_801167 bkgr_new/case_801168 \
+    --output_dir data_new
+python src/evaluate_external.py --run_dir experiments/<batch>/<run> --data_dir data_new
+```
+
 ### Step 4: Analyze Results
 Launch Jupyter Notebook to aggregate and visualize the findings.
 Both Report Plots notebooks start by loading all the results of a specific experiments batch folder, and saving a "exp_results_table.csv" temporary file showcasing the results and fit params.
