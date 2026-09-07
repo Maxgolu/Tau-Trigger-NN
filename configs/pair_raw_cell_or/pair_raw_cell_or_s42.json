@@ -1,0 +1,32 @@
+{
+  "experiment_name": "pair_raw_cell_or",
+  "seed": 42,
+  "representation": "raw_cells",
+  "input_width": 90,
+  "member_order": "measured_pt_descending_then_tob_index_ascending",
+  "model": {"name": "flat_pair_mlp", "layers": [90, 32, 16, 1], "activation": "relu"},
+  "parameter_count": 3457,
+  "measured_pt_branch": "minimum_member_tob_pt",
+  "pair_decision": "neural_score_at_least_t_or_pair_pt_at_least_c",
+  "event_decision": "any_pair_passes",
+  "target": "both_members_tau_labelled",
+  "loss": {"name": "bce", "pair_weighting": "equal"},
+  "optimizer": {"name": "adam", "learning_rate": 0.001},
+  "batch_size": 256,
+  "epochs": 20,
+  "checkpoint_each_epoch": true,
+  "event_aggregation": "maximum_pair_score",
+  "target_event_fpr": 0.005,
+  "validation": {
+    "target_event_fpr": 0.005,
+    "pt_budget_grid": [0.0, 0.0005, 0.001, 0.0015, 0.002, 0.0025, 0.003, 0.0035, 0.004, 0.0045, 0.005],
+    "energy_column": "member_min_truth_pt_gev",
+    "objective_energy_edges_gev": [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
+    "protected_energy_edges_gev": [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120],
+    "allowed_protected_deficit": -0.005,
+    "objective_tolerance": 0.002,
+    "checkpoint_tie_break": ["worst_protected_window_delta", "inclusive_signal_accepted", "eligible_signal_accepted", "background_accepted", "validation_bce", "lower_pt_budget", "earlier_epoch"],
+    "final_calibration": "selected_checkpoint_on_complete_validation_background",
+    "promotion_requires_protected_confirmation": true
+  }
+}

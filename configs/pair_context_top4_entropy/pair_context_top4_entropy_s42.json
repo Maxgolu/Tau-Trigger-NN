@@ -1,0 +1,49 @@
+{
+  "experiment_name": "pair_context_top4_entropy",
+  "seed": 42,
+  "representation": "high_resolution_em2_context",
+  "representation_details": {
+    "member_image": "12x12_em2",
+    "member_scalars": [
+      "45_core_cells",
+      "measured_tob_pt",
+      "em2_best_3x3_fraction"
+    ],
+    "context_features": [
+      "top4_pt_entropy"
+    ],
+    "context_definition": "natural-log entropy of measured pT within the top four"
+  },
+  "context_features": [
+    "top4_pt_entropy"
+  ],
+  "include_member_pt": true,
+  "model": {
+    "name": "shared_member_high_resolution_em2",
+    "member_scalar_width": 47,
+    "context_width": 1,
+    "member_embedding_width": 16,
+    "pair_head": [
+      33,
+      32,
+      16,
+      1
+    ],
+    "trainable_parameters": 4321
+  },
+  "target": "both_members_tau_labelled",
+  "loss": {
+    "name": "bce",
+    "pair_weighting": "power_law_pminus1_member_min",
+    "weight_coordinate": "member_min_truth_pt_gev"
+  },
+  "optimizer": {
+    "name": "adam",
+    "learning_rate": 0.001
+  },
+  "batch_size": 256,
+  "epochs": 20,
+  "checkpoint_each_epoch": true,
+  "event_aggregation": "maximum_pair_score",
+  "target_event_fpr": 0.005
+}

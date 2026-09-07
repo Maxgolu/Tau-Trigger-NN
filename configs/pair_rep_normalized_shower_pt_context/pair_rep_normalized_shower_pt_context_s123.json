@@ -1,0 +1,38 @@
+{
+  "experiment_name": "pair_rep_normalized_shower_pt_context",
+  "seed": 123,
+  "representation": "prepared_member_features",
+  "member_features": [
+    "em2_normalized_dominance",
+    "em2_best_3x3_fraction",
+    "measured_tob_pt",
+    "event_second_highest_tob_pt"
+  ],
+  "model": {
+    "name": "shared_member_pair_mlp",
+    "member_width": 4,
+    "fusion": "ordered",
+    "output_classes": 1,
+    "member_embedding_width": 16,
+    "pair_head": [
+      32,
+      32,
+      16,
+      1
+    ]
+  },
+  "target": "both_members_tau_labelled",
+  "loss": {
+    "name": "bce",
+    "pair_weighting": "equal"
+  },
+  "optimizer": {
+    "name": "adam",
+    "learning_rate": 0.001
+  },
+  "batch_size": 256,
+  "epochs": 20,
+  "checkpoint_each_epoch": true,
+  "event_aggregation": "maximum_pair_score",
+  "target_event_fpr": 0.005
+}

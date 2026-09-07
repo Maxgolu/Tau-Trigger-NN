@@ -1,0 +1,16 @@
+{
+  "experiment_name": "pair_raw_cells",
+  "seed": 456,
+  "representation": "raw_cells",
+  "input_width": 90,
+  "member_order": "measured_pt_descending_then_tob_index_ascending",
+  "model": {"name": "flat_pair_mlp", "layers": [90, 32, 16, 1], "activation": "relu"},
+  "target": "both_members_tau_labelled",
+  "loss": {"name": "bce", "pair_weighting": "equal"},
+  "optimizer": {"name": "adam", "learning_rate": 0.001},
+  "batch_size": 256,
+  "epochs": 20,
+  "checkpoint_each_epoch": true,
+  "event_aggregation": "maximum_pair_score",
+  "target_event_fpr": 0.005
+}
