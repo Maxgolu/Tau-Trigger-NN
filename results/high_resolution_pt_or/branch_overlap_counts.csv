@@ -1,0 +1,13 @@
+seed,population,category,accepted
+42,inclusive_signal,different_pairs_only_overlap,9
+42,inclusive_signal,neural_only,1662
+42,inclusive_signal,pt_only,54
+42,inclusive_signal,same_pair_overlap,1501
+123,inclusive_signal,different_pairs_only_overlap,3
+123,inclusive_signal,neural_only,1716
+123,inclusive_signal,pt_only,46
+123,inclusive_signal,same_pair_overlap,1515
+456,inclusive_signal,different_pairs_only_overlap,6
+456,inclusive_signal,neural_only,1741
+456,inclusive_signal,pt_only,57
+456,inclusive_signal,same_pair_overlap,1501

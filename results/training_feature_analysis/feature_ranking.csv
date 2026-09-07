@@ -1,0 +1,5 @@
+category,display_label,source_feature,weighting,oriented_auc
+measured_pt,Lower member measured pT,S_member_pt,equal_event,0.9510428840773762
+pair_geometry,Wrapped angular separation,pair_abs_delta_phi,equal_event,0.9024631824625604
+em2_energy,Lower member EM2 best 3x3 energy,S_em2_best_3x3_sum,equal_event,0.8979793538766305
+shower_shape,Higher member EM2 normalized width,L_em2_normalized_width,equal_event,0.819617780368865

@@ -1,0 +1,6 @@
+feature_a,feature_b,spearman,relationship
+Pair minimum measured pT,Lower member measured pT,1.0,exact duplicate
+Pair maximum measured pT,Higher member measured pT,1.0,exact duplicate
+Wrapped angular separation,Acoplanarity,-0.9999693361860813,near duplicate
+Lower member EM2 total,Lower member coarse EM2 sum,1.0,exact duplicate
+Higher member EM2 total,Higher member coarse EM2 sum,1.0,exact duplicate

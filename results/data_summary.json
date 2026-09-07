@@ -1,0 +1,34 @@
+{
+  "source_files": {
+    "signal_csv": {
+      "name": "Signal/signal_combined.csv",
+      "sha256": "857715d639a863f212512c4f3503acad7066ca21a4439a1f6cca9aad22b5e2f6"
+    },
+    "signal_npz": {
+      "name": "Signal/signal_combined.npz",
+      "sha256": "09532fd496dc51ffe2b24fff78ad9a8775ba0eaa0b638a7c77096ade49263f48"
+    },
+    "background_csv": {
+      "name": "Background/bkg_combined.csv",
+      "sha256": "cd9b156ab287f544cde873ac4ab374d6c26ea1ff2e18e905ca3189463711ad7b"
+    },
+    "background_npz": {
+      "name": "Background/bkg_combined.npz",
+      "sha256": "7c37cf9f4a1172b900f9ad5e03b661ce7ad6002fd3b4da56702f447920bcaa9a"
+    }
+  },
+  "event_inventory": {
+    "signal": 72404,
+    "background": 249022,
+    "total": 321426
+  },
+  "training_pair_inventory": {
+    "complete": 1292919,
+    "eligible": 1143864,
+    "eligible_positive": 25464,
+    "eligible_negative": 1118400
+  },
+  "measured_tob_pt_unit": "MeV",
+  "pair_label_definition": "sum of the two binary TOB labels",
+  "truth_limit": "label 2 means two positively labelled TOB rows; unique generator-particle identity is not present in the exported inputs"
+}

@@ -1,0 +1,6 @@
+metric,value
+additional_event_OR_operations,1
+additional_pair_min_operations_per_pair,1
+neural_evaluations_per_six_TOB_event,6
+retraining,False
+trainable_parameters,4321

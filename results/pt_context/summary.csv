@@ -1,0 +1,10 @@
+candidate,display_label,mean_inclusive_signal_efficiency,delta_vs_current,conclusion
+current_member_pt_and_event_second_pt,Current member pT + event second-highest pT,0.44756169882760827,0.0,retained reference
+pair_sum_and_balance,Pair sum and balance,0.4451895442726153,-0.0023721545549929292,closest alternative
+top_four_pt_concentration,Top-four pT concentration,0.43893982938734544,-0.008621869440262763,did not improve reference
+pair_fraction_of_event_pt,Pair fraction of event pT,0.4338761917795721,-0.01368550704803613,did not improve reference
+highest_pt_outside_pair,Highest pT outside the pair,0.4324620227179417,-0.01509967610966653,did not improve reference
+total_pt_outside_pair,Total pT outside the pair,0.43227954929063456,-0.015282149536973677,did not improve reference
+top_four_pt_spread,Top-four pT spread,0.42593859769171116,-0.021623101135897087,did not improve reference
+total_event_pt,Total event pT,0.4222435107887414,-0.025318188038866842,did not improve reference
+deterministic_second_pt_baseline,Deterministic second-highest-pT baseline,0.34391679211714793,-0.10364490671046034,baseline
