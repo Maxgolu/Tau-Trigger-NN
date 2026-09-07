@@ -118,6 +118,24 @@ class PairModelTests(unittest.TestCase):
         inputs = torch.randn(7, 2, 3)
         self.assertTrue(torch.allclose(model(inputs), model(inputs.flip(1))))
 
+    def test_reproduced_shared_member_screen_topology(self):
+        expected_parameters = {45: 3_601, 46: 3_633, 17: 2_705}
+        for member_width, parameter_count in expected_parameters.items():
+            with self.subTest(member_width=member_width):
+                model = SharedMemberPairMLP(
+                    member_width,
+                    member_encoder=[member_width, 32, 16],
+                    fusion="symmetric_sum_absolute_difference",
+                    activation="leaky_relu_0.01",
+                    initialization="pytorch_default",
+                )
+                inputs = torch.randn(5, 2, member_width)
+                self.assertEqual(tuple(model(inputs).shape), (5, 1))
+                self.assertTrue(
+                    torch.allclose(model(inputs), model(inputs.flip(1)))
+                )
+                self.assertEqual(count_parameters(model), parameter_count)
+
     def test_shared_member_model_rejects_invalid_contract(self):
         with self.assertRaises(ValueError):
             SharedMemberPairMLP(0)

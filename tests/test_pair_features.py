@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.features import FEATURE_REGISTRY
 from src.pair_features import (
+    COMPACT_EM2_FEATURE_NAMES,
+    compact_em2_member_features,
     em2_best_3x3_fraction,
     member_summary_features,
     raw_cell_pair_features,
@@ -19,6 +21,55 @@ from src.pair_features import (
 
 
 class PairFeatureTests(unittest.TestCase):
+    def test_compact_em2_member_features_have_exact_order_and_goldens(self):
+        image = np.zeros((12, 12), dtype=np.float32)
+        image[0, 0] = 10.0
+        image[0, 1] = 5.0
+        image[1, 0] = 2.0
+
+        result = compact_em2_member_features(image, 20.0)
+
+        self.assertEqual(result.shape, (17,))
+        self.assertNotIn("em2_maxdist", COMPACT_EM2_FEATURE_NAMES)
+        expected = {
+            "em2_max1": 10.0,
+            "em2_max2": 5.0,
+            "em2_max_neighbors_sum": 7.0,
+            "em2_width": 7.0,
+            "em2_normalized_width": 7.0 / 17.0,
+            "em2_best_3x3_fraction": 1.0,
+            "em2_maxratio_approx": -5.0,
+            "em2_top3_window1_fraction": 1.0,
+            "em2_top3_window2_fraction": 0.0,
+            "em2_top3_window3_fraction": 0.0,
+            "em2_top3_window12_sqdist": 9.0,
+            "em2_top3_window13_sqdist": 36.0,
+            "em2_top3_window23_sqdist": 9.0,
+            "em2_top2_3x3_sqdist": 9.0,
+            "em2_6x6_maxdist": 1.0,
+            "em2_outside_best_3x3_over_pt": 0.0,
+            "measured_tob_pt": 20.0,
+        }
+        np.testing.assert_allclose(
+            result,
+            [expected[name] for name in COMPACT_EM2_FEATURE_NAMES],
+            rtol=1e-7,
+            atol=1e-7,
+        )
+
+    def test_compact_em2_mapping_preserves_pair_member_axis(self):
+        images = np.zeros((2, 2, 12, 12), dtype=np.float32)
+        images[0, 0, 0, 0] = 3.0
+        images[0, 1, 1, 1] = 4.0
+        images[1, 0, 2, 2] = 5.0
+        images[1, 1, 3, 3] = 6.0
+        pt = np.array([[30.0, 20.0], [18.0, 12.0]], dtype=np.float32)
+
+        result = compact_em2_member_features(images, pt, chunk_size=1)
+
+        self.assertEqual(result.shape, (2, 2, 17))
+        np.testing.assert_array_equal(result[..., -1], pt)
+
     def test_raw_cells_preserve_member_local_order(self):
         left = np.arange(45, dtype=np.float32).reshape(5, 3, 3)
         right = (100 + np.arange(45, dtype=np.float32)).reshape(5, 3, 3)

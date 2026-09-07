@@ -26,6 +26,16 @@ confirmation and the final unbiased evaluation remain planned work.
   deterministic baseline, the pT-only control and the later calorimeter
   representations. It also separates the controlled event-context and shower
   information effects and the output/fusion checks.
+- `representation_reproduction/` records the completed three-seed reproduction
+  of three descriptive representation candidates: raw coarse cells without
+  member pT, raw coarse cells with member pT, and compact EM2 measurements with
+  member pT. It includes global validation efficiency and conditional
+  low/medium/high-energy differences. These results are validation-only and
+  unconfirmed; the test set remains unopened. A compact seed-42 table also
+  preserves the complete scalar/coarse screen: 22 candidates were tested, 19
+  were closed after screening, and the three named above were reproduced across
+  all three seeds. Later high-resolution image studies are not part of that
+  screen.
 - `high_resolution/` records the shared high-resolution model's validation
   summary and a conditional matched-member pT-region diagnostic. The regional
   coordinate is not an inclusive two-distinct-generator-tau quantity.

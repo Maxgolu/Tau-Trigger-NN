@@ -1,0 +1,4 @@
+candidate,display_label,parameter_count,seed_count,mean_inclusive_signal_efficiency,mean_candidate_minus_baseline,baseline_efficiency,evidence_status
+raw_coarse_cells_without_member_pt,Raw coarse cells without member pT,3601,3,0.4077368733178231,0.06382008120067516,0.34391679211714793,validation_only_unconfirmed
+raw_coarse_cells_with_member_pt,Raw coarse cells with member pT,3633,3,0.4085123853838785,0.06459559326673053,0.34391679211714793,validation_only_unconfirmed
+compact_em2_measurements_with_member_pt,Compact EM2 measurements with member pT,2705,3,0.40258199899639613,0.058665206879248206,0.34391679211714793,validation_only_unconfirmed

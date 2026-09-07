@@ -1,0 +1,10 @@
+candidate,display_label,seed,parameter_count,inclusive_signal_efficiency,baseline_efficiency,candidate_minus_baseline,background_fpr,evidence_status
+raw_coarse_cells_without_member_pt,Raw coarse cells without member pT,42,3601,0.4112494867934857,0.34391679211714793,0.06733269467633776,0.004992953493054157,validation_only_unconfirmed
+raw_coarse_cells_without_member_pt,Raw coarse cells without member pT,123,3601,0.4087860955248392,0.34391679211714793,0.06486930340769126,0.004992953493054157,validation_only_unconfirmed
+raw_coarse_cells_without_member_pt,Raw coarse cells without member pT,456,3601,0.4031750376351444,0.34391679211714793,0.05925824551799644,0.004992953493054157,validation_only_unconfirmed
+raw_coarse_cells_with_member_pt,Raw coarse cells with member pT,42,3633,0.4089229505953196,0.34391679211714793,0.06500615847817162,0.004992953493054157,validation_only_unconfirmed
+raw_coarse_cells_with_member_pt,Raw coarse cells with member pT,123,3633,0.41042835637060354,0.34391679211714793,0.06651156425345559,0.004992953493054157,validation_only_unconfirmed
+raw_coarse_cells_with_member_pt,Raw coarse cells with member pT,456,3633,0.4061858491857123,0.34391679211714793,0.06226905706856439,0.004992953493054157,validation_only_unconfirmed
+compact_em2_measurements_with_member_pt,Compact EM2 measurements with member pT,42,2705,0.40249076228274255,0.34391679211714793,0.05857397016559464,0.004992953493054157,validation_only_unconfirmed
+compact_em2_measurements_with_member_pt,Compact EM2 measurements with member pT,123,2705,0.40468044341042836,0.34391679211714793,0.060763651293280416,0.004992953493054157,validation_only_unconfirmed
+compact_em2_measurements_with_member_pt,Compact EM2 measurements with member pT,456,2705,0.40057479129601753,0.34391679211714793,0.05665799917886958,0.004992953493054157,validation_only_unconfirmed

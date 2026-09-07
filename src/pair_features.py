@@ -10,6 +10,25 @@ import numpy as np
 CORE_SHAPE = (5, 3, 3)
 EM2_SHAPE = (12, 12)
 SUMMARY_WIDTH = 16
+COMPACT_EM2_FEATURE_NAMES = (
+    "em2_max1",
+    "em2_max2",
+    "em2_max_neighbors_sum",
+    "em2_width",
+    "em2_normalized_width",
+    "em2_best_3x3_fraction",
+    "em2_maxratio_approx",
+    "em2_top3_window1_fraction",
+    "em2_top3_window2_fraction",
+    "em2_top3_window3_fraction",
+    "em2_top3_window12_sqdist",
+    "em2_top3_window13_sqdist",
+    "em2_top3_window23_sqdist",
+    "em2_top2_3x3_sqdist",
+    "em2_6x6_maxdist",
+    "em2_outside_best_3x3_over_pt",
+    "measured_tob_pt",
+)
 
 
 def _validated_array(values, trailing_shape, name):
@@ -170,3 +189,169 @@ def summary_pt_pair_features(
         ),
         axis=-1,
     )
+
+
+def _safe_exact_zero_ratio(numerator, denominator):
+    """Return a float32 ratio, defining only an exact-zero denominator as zero."""
+    numerator64 = np.asarray(numerator, dtype=np.float64)
+    denominator64 = np.asarray(denominator, dtype=np.float64)
+    result = np.zeros(
+        np.broadcast_shapes(numerator64.shape, denominator64.shape),
+        dtype=np.float64,
+    )
+    np.divide(
+        numerator64,
+        denominator64,
+        out=result,
+        where=denominator64 != 0.0,
+    )
+    return result.astype(np.float32)
+
+
+def _compact_em2_chunk(images, member_pt):
+    """Vectorized implementation of the compact EM2 feature contract."""
+    count = len(images)
+    totals = images.sum(axis=(1, 2), dtype=np.float32)
+    flat = images.reshape(count, 144)
+
+    # Stable row-major ordering makes ties deterministic.
+    cell_order = np.argsort(-flat, axis=1, kind="stable")[:, :2]
+    cell_values = np.take_along_axis(flat, cell_order, axis=1)
+    center_row, center_column = np.divmod(cell_order[:, 0], 12)
+
+    grid_row, grid_column = np.ogrid[:12, :12]
+    distance2 = (
+        (grid_row[None] - center_row[:, None, None]) ** 2
+        + (grid_column[None] - center_column[:, None, None]) ** 2
+    )
+    raw_width = np.sum(
+        images * distance2,
+        axis=(1, 2),
+        dtype=np.float64,
+    ).astype(np.float32)
+
+    padded = np.pad(images, ((0, 0), (1, 1), (1, 1)))
+    neighborhoods = np.lib.stride_tricks.sliding_window_view(
+        padded, (3, 3), axis=(1, 2)
+    )
+    neighborhood_sums = neighborhoods.sum(axis=(-1, -2), dtype=np.float32)
+    neighbor_sum = (
+        neighborhood_sums[np.arange(count), center_row, center_column]
+        - cell_values[:, 0]
+    )
+
+    windows = np.lib.stride_tricks.sliding_window_view(
+        images, (3, 3), axis=(1, 2)
+    ).sum(axis=(-1, -2), dtype=np.float32)
+    ranked = np.argsort(-windows.reshape(count, 100), axis=1, kind="stable")
+    chosen_rows = np.full((count, 3), -1, dtype=np.int64)
+    chosen_columns = np.full((count, 3), -1, dtype=np.int64)
+    chosen_energy = np.empty((count, 3), dtype=np.float32)
+    chosen_count = np.zeros(count, dtype=np.int8)
+    row_index = np.arange(count)
+    for rank in range(100):
+        candidate = ranked[:, rank]
+        row, column = np.divmod(candidate, 10)
+        eligible = chosen_count < 3
+        for slot in range(3):
+            present = chosen_count > slot
+            eligible &= (~present) | (
+                (np.abs(row - chosen_rows[:, slot]) >= 3)
+                | (np.abs(column - chosen_columns[:, slot]) >= 3)
+            )
+        for slot in range(3):
+            mask = eligible & (chosen_count == slot)
+            chosen_rows[mask, slot] = row[mask]
+            chosen_columns[mask, slot] = column[mask]
+            chosen_energy[mask, slot] = windows[
+                row_index[mask], row[mask], column[mask]
+            ]
+        chosen_count[eligible] += 1
+    if np.any(chosen_count != 3):
+        raise ValueError("could not select three non-overlapping EM2 windows")
+
+    top_fraction = _safe_exact_zero_ratio(chosen_energy, totals[:, None])
+    top_distances = np.stack(
+        (
+            (chosen_rows[:, 0] - chosen_rows[:, 1]) ** 2
+            + (chosen_columns[:, 0] - chosen_columns[:, 1]) ** 2,
+            (chosen_rows[:, 0] - chosen_rows[:, 2]) ** 2
+            + (chosen_columns[:, 0] - chosen_columns[:, 2]) ** 2,
+            (chosen_rows[:, 1] - chosen_rows[:, 2]) ** 2
+            + (chosen_columns[:, 1] - chosen_columns[:, 2]) ** 2,
+        ),
+        axis=1,
+    ).astype(np.float32)
+
+    reduced = images.reshape(count, 6, 2, 6, 2).sum(
+        axis=(2, 4), dtype=np.float32
+    ).reshape(count, 36)
+    reduced_order = np.argsort(-reduced, axis=1, kind="stable")[:, :2]
+    reduced_rows, reduced_columns = np.divmod(reduced_order, 6)
+    six_by_six_distance = (
+        (reduced_rows[:, 0] - reduced_rows[:, 1]) ** 2
+        + (reduced_columns[:, 0] - reduced_columns[:, 1]) ** 2
+    ).astype(np.float32)
+
+    features = np.stack(
+        (
+            cell_values[:, 0],
+            cell_values[:, 1],
+            neighbor_sum,
+            raw_width,
+            _safe_exact_zero_ratio(raw_width, totals),
+            _safe_exact_zero_ratio(chosen_energy[:, 0], totals),
+            cell_values[:, 1] - cell_values[:, 0],
+            top_fraction[:, 0],
+            top_fraction[:, 1],
+            top_fraction[:, 2],
+            top_distances[:, 0],
+            top_distances[:, 1],
+            top_distances[:, 2],
+            top_distances[:, 0],
+            six_by_six_distance,
+            _safe_exact_zero_ratio(
+                totals - chosen_energy[:, 0], member_pt
+            ),
+            member_pt,
+        ),
+        axis=1,
+    ).astype(np.float32)
+    if not np.isfinite(features).all():
+        raise ValueError("compact EM2 features contain a non-finite value")
+    return features
+
+
+def compact_em2_member_features(em2, member_pt, *, chunk_size=8192):
+    """Return the exact 17-value compact EM2-plus-pT member representation.
+
+    The historical ``em2_maxdist`` quantity is deliberately excluded. The
+    retained values describe cell peaks, local energy, width, three
+    non-overlapping 3x3 windows, coarse 6x6 separation, an outside-window/pT
+    ratio and measured member pT. Inputs may have any shared prefix before the
+    12x12 image axes; the result has that prefix followed by width 17.
+    """
+    image = _validated_array(em2, EM2_SHAPE, "em2")
+    prefix = image.shape[:-len(EM2_SHAPE)]
+    pt = np.asarray(member_pt, dtype=np.float32)
+    if pt.shape == prefix + (1,):
+        pt = pt[..., 0]
+    if pt.shape != prefix:
+        raise ValueError(f"member_pt must have shape {prefix} or {prefix + (1,)}")
+    if not np.isfinite(pt).all():
+        raise ValueError("member_pt contains a non-finite value")
+    if not isinstance(chunk_size, int) or isinstance(chunk_size, bool) or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer")
+
+    flat_images = image.reshape(-1, 12, 12)
+    flat_pt = pt.reshape(-1)
+    parts = [
+        _compact_em2_chunk(flat_images[start : start + chunk_size], flat_pt[start : start + chunk_size])
+        for start in range(0, len(flat_images), chunk_size)
+    ]
+    values = (
+        np.concatenate(parts, axis=0)
+        if parts
+        else np.empty((0, len(COMPACT_EM2_FEATURE_NAMES)), dtype=np.float32)
+    )
+    return values.reshape(prefix + (len(COMPACT_EM2_FEATURE_NAMES),))

@@ -195,6 +195,11 @@ def _candidate_label(name: str) -> str:
         "inverse_frequency_weighting": "Inverse-frequency\nweighting",
         "power_law_p_minus_1": "Power-law\nweighting",
         "raw_cell_plus_pt_or": "Pair network\nOR pT",
+        "raw_coarse_cells_without_member_pt": "Raw coarse cells\nwithout member pT",
+        "raw_coarse_cells_with_member_pt": "Raw coarse cells\nwith member pT",
+        "compact_em2_measurements_with_member_pt": (
+            "Compact EM2 measurements\nwith member pT"
+        ),
     }
     return labels.get(name, name.replace("_", " "))
 
@@ -460,6 +465,172 @@ def plot_pt_context_ranking(results_dir: Path, output_dir: Path) -> Path:
     return _finish(fig, output_dir / "pt_context_ranking.png")
 
 
+def plot_representation_reproduction_global(
+    results_dir: Path, output_dir: Path
+) -> Path:
+    rows = _read_rows(
+        results_dir / "representation_reproduction" / "global_validation.csv",
+        (
+            "candidate",
+            "display_label",
+            "seed",
+            "inclusive_signal_efficiency",
+            "baseline_efficiency",
+        ),
+    )
+    summary = _read_rows(
+        results_dir / "representation_reproduction" / "global_summary.csv",
+        ("candidate", "display_label", "mean_inclusive_signal_efficiency"),
+    )
+    baseline = float(rows[0]["baseline_efficiency"])
+    candidates = [row["candidate"] for row in summary]
+    labels = ["Deterministic\npT baseline"] + [
+        _candidate_label(candidate) for candidate in candidates
+    ]
+    means = [baseline] + [
+        float(row["mean_inclusive_signal_efficiency"]) for row in summary
+    ]
+
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(10.4, 5.5))
+    positions = list(range(len(labels)))
+    colors = ["#7b8188", "#2f74b5", "#1f9e89", "#7a63a8"]
+    bars = ax.bar(positions, [100 * value for value in means], color=colors, width=0.67)
+    ax.bar_label(
+        bars,
+        labels=[f"{100 * value:.2f}%" for value in means],
+        padding=5,
+        fontsize=9,
+    )
+
+    jitter = {42: -0.10, 123: 0.0, 456: 0.10}
+    for index, candidate in enumerate(candidates, start=1):
+        selected = [row for row in rows if row["candidate"] == candidate]
+        for row in selected:
+            seed = int(row["seed"])
+            ax.scatter(
+                index + jitter[seed],
+                100 * float(row["inclusive_signal_efficiency"]),
+                s=35,
+                facecolor="white",
+                edgecolor="#20252a",
+                linewidth=1,
+                zorder=3,
+            )
+
+    ax.set_xticks(positions, labels)
+    ax.set(
+        title="Three reproduced representations improved the validation point estimate",
+        ylabel="Inclusive signal-sample validation efficiency (%)",
+        ylim=(32, 43),
+    )
+    ax.text(
+        0.01,
+        0.97,
+        "Bars: three-seed mean   •   White dots: individual seeds",
+        transform=ax.transAxes,
+        va="top",
+        color="#50565c",
+        fontsize=9,
+    )
+    ax.grid(axis="y", alpha=0.2)
+    fig.text(
+        0.99,
+        0.015,
+        "Validation only · protected confirmation pending · test unopened",
+        ha="right",
+        color="#666666",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.045, 1, 1))
+    return _finish(fig, output_dir / "representation_reproduction_global.png")
+
+
+def plot_representation_reproduction_regions(
+    results_dir: Path, output_dir: Path
+) -> Path:
+    rows = _read_rows(
+        results_dir / "representation_reproduction" / "energy_region_deltas.csv",
+        (
+            "candidate",
+            "seed",
+            "region_gev",
+            "candidate_minus_baseline",
+        ),
+    )
+    region_order = ["10-25", "25-60", "60+"]
+    candidates = list(dict.fromkeys(row["candidate"] for row in rows))
+    colors = ["#2f74b5", "#1f9e89", "#7a63a8"]
+    offsets = [-0.18, 0.0, 0.18]
+    seed_jitter = {"42": -0.035, "123": 0.0, "456": 0.035}
+
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(10.2, 5.5))
+    for candidate_index, (candidate, color) in enumerate(
+        zip(candidates, colors, strict=True)
+    ):
+        mean_rows = {
+            row["region_gev"]: row
+            for row in rows
+            if row["candidate"] == candidate and row["seed"] == "mean"
+        }
+        x_values = [index + offsets[candidate_index] for index in range(3)]
+        mean_values = [
+            100 * float(mean_rows[region]["candidate_minus_baseline"])
+            for region in region_order
+        ]
+        ax.plot(
+            x_values,
+            mean_values,
+            marker="o",
+            linewidth=2.2,
+            markersize=7,
+            color=color,
+            label=_candidate_label(candidate).replace("\n", " "),
+        )
+        for region_index, region in enumerate(region_order):
+            seed_rows = [
+                row
+                for row in rows
+                if row["candidate"] == candidate
+                and row["region_gev"] == region
+                and row["seed"] != "mean"
+            ]
+            for row in seed_rows:
+                ax.scatter(
+                    region_index
+                    + offsets[candidate_index]
+                    + seed_jitter[row["seed"]],
+                    100 * float(row["candidate_minus_baseline"]),
+                    s=27,
+                    facecolor="white",
+                    edgecolor=color,
+                    linewidth=1,
+                    zorder=3,
+                )
+
+    ax.axhline(0, color="#333333", linewidth=1.2)
+    ax.set_xticks(range(3), ["10–25", "25–60", "60+"])
+    ax.set(
+        title="Validation gains were concentrated below 60 GeV",
+        xlabel="Matched-member pT region (GeV; conditional diagnostic)",
+        ylabel="Candidate minus baseline efficiency (percentage points)",
+    )
+    ax.grid(axis="y", alpha=0.2)
+    ax.legend(frameon=False, loc="upper right", fontsize=8.5)
+    fig.text(
+        0.99,
+        0.015,
+        "Lines: three-seed mean   •   White dots: individual seeds\n"
+        "Validation only",
+        ha="right",
+        color="#666666",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.045, 1, 1))
+    return _finish(fig, output_dir / "representation_reproduction_energy_regions.png")
+
+
 PLOTS = {
     "training-curves": plot_training_curves,
     "checkpoint-selection": plot_checkpoint_selection,
@@ -474,6 +645,8 @@ PLOTS = {
     "pair-or-validation": plot_pair_or_validation,
     "pair-or-regions": plot_pair_or_regions,
     "pt-context-ranking": plot_pt_context_ranking,
+    "representation-reproduction-global": plot_representation_reproduction_global,
+    "representation-reproduction-regions": plot_representation_reproduction_regions,
 }
 
 

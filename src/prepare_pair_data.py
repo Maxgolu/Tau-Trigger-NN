@@ -16,6 +16,7 @@ try:
     )
     from .pair_data import build_pair_dataset
     from .pair_features import (
+        compact_em2_member_features,
         em2_best_3x3_fraction,
         member_summary_features,
         raw_cell_pair_features,
@@ -31,6 +32,7 @@ except ImportError:
     )
     from pair_data import build_pair_dataset
     from pair_features import (
+        compact_em2_member_features,
         em2_best_3x3_fraction,
         member_summary_features,
         raw_cell_pair_features,
@@ -229,6 +231,30 @@ def _representation_arrays(
         return {"inputs": raw_cell_pair_features(left_core, right_core)}
     if name == "raw_cells_pt":
         return {"inputs": raw_cell_pt_pair_features(left_core, left_pt, right_core, right_pt)}
+    if name == "member_coarse_cells":
+        return {
+            "inputs": np.stack(
+                (left_core.reshape(-1, 45), right_core.reshape(-1, 45)),
+                axis=1,
+            ).astype(np.float32)
+        }
+    if name == "member_coarse_cells_pt":
+        return {
+            "inputs": np.stack(
+                (
+                    np.concatenate((left_core.reshape(-1, 45), left_pt[:, None]), axis=1),
+                    np.concatenate((right_core.reshape(-1, 45), right_pt[:, None]), axis=1),
+                ),
+                axis=1,
+            ).astype(np.float32)
+        }
+    if name == "member_compact_em2_pt":
+        return {
+            "inputs": compact_em2_member_features(
+                np.stack((left_em2, right_em2), axis=1),
+                np.stack((left_pt, right_pt), axis=1),
+            )
+        }
     if name == "summaries":
         return {"inputs": summary_pair_features(left_core, left_em2, right_core, right_em2)}
     if name == "summaries_pt":
@@ -421,6 +447,30 @@ def preparation_contract(config):
             raise ValueError("prepared member features require shared_member_pair_mlp")
         if int(model.get("member_width", -1)) != len(member_features):
             raise ValueError("model member_width must equal the member feature count")
+    screen_widths = {
+        "member_coarse_cells": 45,
+        "member_coarse_cells_pt": 46,
+        "member_compact_em2_pt": 17,
+    }
+    if representation in screen_widths:
+        model = config.get("model", {})
+        expected_width = screen_widths[representation]
+        if model.get("name") != "shared_member_pair_mlp":
+            raise ValueError(
+                "reproduced member representations require shared_member_pair_mlp"
+            )
+        if int(model.get("member_width", -1)) != expected_width:
+            raise ValueError("model member_width disagrees with the representation")
+        if model.get("member_encoder") != [expected_width, 32, 16]:
+            raise ValueError("model member_encoder must be [member_width, 32, 16]")
+        if model.get("fusion") != "symmetric_sum_absolute_difference":
+            raise ValueError("model fusion must be symmetric_sum_absolute_difference")
+        if model.get("pair_head") != [32, 32, 16, 1]:
+            raise ValueError("model pair_head must be [32, 32, 16, 1]")
+        if model.get("activation") != "leaky_relu_0.01":
+            raise ValueError("model activation must be leaky_relu_0.01")
+        if model.get("initialization") != "pytorch_default":
+            raise ValueError("model initialization must be pytorch_default")
     if representation == "high_resolution_em2_context":
         if not isinstance(context_features, list) or not context_features:
             raise ValueError("context representation requires context_features")
@@ -503,6 +553,9 @@ def parse_args():
             "raw_cells_pt",
             "summaries",
             "summaries_pt",
+            "member_coarse_cells",
+            "member_coarse_cells_pt",
+            "member_compact_em2_pt",
             "high_resolution_em2",
             "high_resolution_em2_context",
         ],

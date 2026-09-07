@@ -109,6 +109,22 @@ implementation is in `src/pair_context_features.py`; each alternative has
 separate seed-42, seed-123 and seed-456 configurations under
 `configs/pair_context_*/`.
 
+A separate scalar/coarse representation screen kept the pair model fixed while
+changing only its member inputs. It tested 22 representations with seed 42 and
+repeated three representative families with seeds 42, 123 and 456:
+
+```text
+45 coarse cells per member
+45 coarse cells plus measured member pT
+16 compact EM2 measurements plus measured member pT
+```
+
+These configurations use the same `d -> 32 -> 16` encoder for both members,
+combine the two embeddings through their sum and absolute difference, and use a
+`32 -> 16 -> 1` pair head. The compact result tables and plots are under
+`results/representation_reproduction/`. They are validation-only evidence; no
+test result is claimed.
+
 ## Models and classifier decisions
 
 `src/pair_models.py` contains the principal models implemented for the pair

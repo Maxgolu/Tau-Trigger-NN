@@ -79,28 +79,61 @@ class SharedMemberPairMLP(nn.Module):
         fusion="ordered",
         output_classes=1,
         initialization="explicit_relu",
+        member_encoder=None,
+        activation="relu",
     ):
         super().__init__()
         if int(member_width) <= 0:
             raise ValueError("member_width must be positive")
-        if fusion not in {"ordered", "symmetric"}:
-            raise ValueError("fusion must be ordered or symmetric")
+        if fusion not in {
+            "ordered",
+            "symmetric",
+            "symmetric_sum_absolute_difference",
+        }:
+            raise ValueError("unsupported member fusion")
         if int(output_classes) not in {1, 3}:
             raise ValueError("output_classes must be 1 or 3")
         if initialization not in {"explicit_relu", "pytorch_default"}:
             raise ValueError("unsupported shared-member initialization")
+        if activation not in {"relu", "leaky_relu_0.01"}:
+            raise ValueError("unsupported shared-member activation")
         self.member_width = int(member_width)
         self.fusion = fusion
         self.output_classes = int(output_classes)
-        self.member_encoder = nn.Linear(self.member_width, 16)
+        self.activation_name = activation
+        if member_encoder is None:
+            self.member_encoder = nn.Linear(self.member_width, 16)
+            encoder_linear_layers = (self.member_encoder,)
+        else:
+            if activation != "leaky_relu_0.01":
+                raise ValueError(
+                    "the 32 -> 16 member encoder requires leaky_relu_0.01"
+                )
+            expected = [self.member_width, 32, 16]
+            if list(member_encoder) != expected:
+                raise ValueError(f"member_encoder must be {expected}")
+            self.member_encoder = nn.Sequential(
+                nn.Linear(self.member_width, 32),
+                nn.LeakyReLU(0.01),
+                nn.Linear(32, 16),
+            )
+            encoder_linear_layers = (
+                self.member_encoder[0],
+                self.member_encoder[2],
+            )
         self.pair_hidden_1 = nn.Linear(32, 32)
         self.pair_hidden_2 = nn.Linear(32, 16)
         self.output = nn.Linear(16, self.output_classes)
         if initialization == "explicit_relu":
             _initialize_relu_mlp(
-                (self.member_encoder, self.pair_hidden_1, self.pair_hidden_2),
+                (*encoder_linear_layers, self.pair_hidden_1, self.pair_hidden_2),
                 self.output,
             )
+
+    def _activate(self, values):
+        if self.activation_name == "relu":
+            return torch.relu(values)
+        return torch.nn.functional.leaky_relu(values, negative_slope=0.01)
 
     def forward(self, inputs):
         if inputs.ndim != 3 or inputs.shape[1:] != (2, self.member_width):
@@ -108,14 +141,17 @@ class SharedMemberPairMLP(nn.Module):
                 "SharedMemberPairMLP expects inputs with shape "
                 f"(batch, 2, {self.member_width})"
             )
-        left = torch.relu(self.member_encoder(inputs[:, 0]))
-        right = torch.relu(self.member_encoder(inputs[:, 1]))
+        left = self.member_encoder(inputs[:, 0])
+        right = self.member_encoder(inputs[:, 1])
+        if not isinstance(self.member_encoder, nn.Sequential):
+            left = self._activate(left)
+            right = self._activate(right)
         if self.fusion == "ordered":
             pair = torch.cat((left, right), dim=1)
         else:
             pair = torch.cat((left + right, torch.abs(left - right)), dim=1)
-        hidden = torch.relu(self.pair_hidden_1(pair))
-        hidden = torch.relu(self.pair_hidden_2(hidden))
+        hidden = self._activate(self.pair_hidden_1(pair))
+        hidden = self._activate(self.pair_hidden_2(hidden))
         return self.output(hidden)
 
     def predict_proba(self, inputs):
@@ -245,12 +281,20 @@ def build_pair_model(config):
             "pair_head",
             [32, 32, 16, output_classes],
         )
-        return SharedMemberPairMLP(
+        model = SharedMemberPairMLP(
             model_config["member_width"],
             fusion=model_config.get("fusion", "ordered"),
             output_classes=output_classes,
             initialization=model_config.get("initialization", "explicit_relu"),
+            member_encoder=model_config.get("member_encoder"),
+            activation=model_config.get("activation", "relu"),
         )
+        _require_declared_value(
+            model_config,
+            "trainable_parameters",
+            count_parameters(model),
+        )
+        return model
     if name == "shared_member_high_resolution_em2":
         _require_declared_value(model_config, "member_embedding_width", 16)
         member_scalar_width = int(model_config.get("member_scalar_width", 47))
