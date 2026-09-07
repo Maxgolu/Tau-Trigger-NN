@@ -15,3 +15,12 @@ Signal/*.npz
 *.pth
 *.pt
 *.parquet
+*.npy
+
+# Pair-model runtime outputs
+pair_cache/
+checkpoints/
+results/generated/
+presentation/build/
+*.inspect.ndjson
+~$*
