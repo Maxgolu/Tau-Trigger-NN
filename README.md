@@ -90,7 +90,9 @@ rate no greater than 0.5%. The shared threshold rule is in
 [`src/operating_point.py`](src/operating_point.py), and cross-fitted checkpoint
 evaluation is in [`src/pair_evaluate.py`](src/pair_evaluate.py).
 
-## Architecture in one pass
+## Core pair components
+
+### Pair workflow
 
 1. Build the two member inputs for one same-event pair.
 2. Process both members with the same member encoder when that representation
@@ -105,7 +107,7 @@ The representation changes step 1; the member encoder and pair head define the
 learned model. `src/pair_data.py` and `src/pair_validate.py` implement the
 pair-to-event and validation contracts.
 
-## Deterministic baseline
+### Deterministic baseline
 
 The baseline event score is the second-highest selected TOB pT. Pair
 construction provides an exact equivalent:
@@ -124,7 +126,7 @@ max(min(pT_i, pT_j)) = second-highest pT
 Events with fewer than two finite TOBs remain in event-level denominators and
 receive a non-passing score of negative infinity.
 
-## Operational labels and populations
+### Operational labels and populations
 
 Each TOB has a verified binary operational label. A pair receives:
 
@@ -150,7 +152,7 @@ eligible training view contains 1,143,864 pairs: every available background
 pair and signal pairs from events whose selected top four contain at least two
 positive TOB labels.
 
-## Representations in this branch
+### Input representations
 
 The pair modules support the representations implemented in this branch:
 
@@ -196,7 +198,7 @@ combine the two embeddings through their sum and absolute difference, and use a
 `results/representation_reproduction/`. They are validation-only evidence; no
 test result is claimed.
 
-## Models and classifier decisions
+### Models and classifier decisions
 
 `src/pair_models.py` contains the principal models implemented for the pair
 study:
@@ -222,7 +224,7 @@ Events accepted by both branches count once. The standard `pair_validate.py`
 workflow is deliberately NN-only; it cannot silently label that result as an
 OR study.
 
-## Validation procedure
+### Validation and calibration
 
 Validation events are divided into deterministic folds A and B within five
 event strata. For each model seed and checkpoint:
@@ -247,34 +249,6 @@ The current tracked results are validation results. The reserved test sample is
 not used for model or checkpoint selection. If historical pair work used the
 same test events, a genuinely untouched external or future sample is required
 for the final unbiased evaluation.
-
-## Current result artifacts
-
-`results/` contains compact tables and regenerable figures for the controlled
-studies completed so far. This is an evolving, validation-only evidence bundle;
-it is not a complete result set or a final model ranking. See
-`results/README.md` for the available studies and their interpretation limits.
-
-Completed evidence in this branch includes the deterministic mechanics, the
-measured-pT-only diagnostic, the representation and high-resolution studies,
-and the validation-only recovery, OR, pT-factorial and pT-context comparisons.
-The latter adaptive studies have not passed protected confirmation. Planned
-work includes confirmation, further controlled feature/model studies,
-deployment assessment and a final unbiased evaluation. No blind-test result is
-included or claimed.
-
-## Tracked artifacts
-
-The branch retains more than only the best current configuration. It keeps
-reusable implementations and readable per-seed configurations for controlled
-experiments that support the reported
-conclusions, including scientifically useful negative results. This makes it
-possible to reproduce why a direction was retained or rejected.
-
-The repository intentionally excludes raw data, prepared caches, checkpoints,
-pair/event prediction tables, temporary execution manifests and private
-research notes. Compact result tables and regenerable figures are kept in
-`results/` instead.
 
 ## Repository structure
 
@@ -326,7 +300,13 @@ from the existing framework. Pair-specific code uses the same separation of
 data preparation, features, models, training, calibration, evaluation and
 plotting.
 
-## Data
+## Data and dependencies
+
+Install the Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 Place the externally supplied files under a data directory with this layout:
 
@@ -341,12 +321,6 @@ Raw data, checkpoints, predictions and generated caches are intentionally not
 tracked by Git. The `prongs` field is not used as a model input.
 
 ## Example workflow
-
-Install the dependencies:
-
-```bash
-pip install -r requirements.txt
-```
 
 Prepare the pT-only training pairs:
 
@@ -438,6 +412,38 @@ Regenerate the compact result figures:
 python src/pair_plots.py --plot all
 ```
 
+## Results and scope
+
+`results/` contains compact tables and regenerable figures for the controlled
+studies completed so far. This is an evolving, validation-only evidence bundle;
+it is not a complete result set or a final model ranking. See
+`results/README.md` for the available studies and their interpretation limits.
+
+Completed evidence in this branch includes the deterministic mechanics, the
+measured-pT-only diagnostic, the representation and high-resolution studies,
+and the validation-only recovery, OR, pT-factorial and pT-context comparisons.
+The latter adaptive studies have not passed protected confirmation. Planned
+work includes confirmation, further controlled feature/model studies,
+deployment assessment and a final unbiased evaluation. No blind-test result is
+included or claimed.
+
+### Tracked artifacts
+
+The branch retains more than only the best current configuration. It keeps
+reusable implementations and readable per-seed configurations for controlled
+experiments that support the reported conclusions, including scientifically
+useful negative results. This makes it possible to reproduce why a direction
+was retained or rejected.
+
+The repository intentionally excludes raw data, prepared caches, checkpoints,
+pair/event prediction tables, temporary execution manifests and private
+research notes. Compact result tables and regenerable figures are kept in
+`results/` instead.
+
+No binding hardware limit is applied to the research comparisons. The code
+reports model input widths and parameter counts so deployment constraints can
+be assessed when they are available.
+
 ## Tests
 
 Run the focused pair tests:
@@ -462,9 +468,3 @@ Some inherited single-object integration tests load pretrained experiment
 weights. Those checks are skipped when the ignored external `experiments/`
 artifacts are not present; their configuration and architecture unit tests
 still run.
-
-## Current scope
-
-No binding hardware limit is applied to the research comparisons. The code
-reports model input widths and parameter counts so deployment constraints can
-be assessed when they are available.
