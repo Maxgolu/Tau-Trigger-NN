@@ -13,6 +13,11 @@ The raw-OR, high-resolution-OR, pT-factorial and pT-context groups are
 and must not be read as final promoted-model or blind-test results. Protected
 confirmation and the final unbiased evaluation remain planned work.
 
+- `current_configurations.csv` is the compact entry point for the three current
+  reference configurations. It distinguishes input representation, neural
+  architecture and final event decision. The first two rows use the same
+  learned architecture with different event decisions.
+
 - `data_summary.json` records the source filenames and CSV hashes, fixed sample
   and pair counts, input units, and the operational-label limitation used by
   the pair workflow.

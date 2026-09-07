@@ -19,6 +19,77 @@ The event pipeline is fixed:
 Measured `tob_pt` remains in its raw source unit, MeV, until plotting or
 evaluation code explicitly converts it.
 
+## Start here: current leading configurations
+
+The table below lists the strongest configurations observed so far. They are
+validation results, not final models. The high-resolution rows use the same
+learned architecture and differ in their final event decision.
+
+| Role | Input and architecture | Event decision | Mean validation efficiency |
+| --- | --- | --- | ---: |
+| Current overall leader | Shared high-resolution EM2 CNN with coarse cells, shower fraction and measured pT | Neural score OR direct pT branch | 44.76% |
+| High-resolution neural-only comparison | Same shared high-resolution network | Maximum neural pair score | 44.09% |
+| Compact comparison | Shared MLP with EM2 dominance, shower fraction and measured pT | Maximum neural pair score | 42.46% |
+
+For each seed, efficiency is the number of validation signal-sample events
+that pass the event decision divided by all 7,307 validation signal-sample
+events. The reported mean is the arithmetic average across seeds 42, 123 and
+456. Each seed receives its own threshold, calibrated so that the validation
+background-event false-positive rate is at most 0.5%.
+
+An event passes when its final event score satisfies its calibrated decision
+rule. These efficiencies are adaptive validation evidence. Protected
+confirmation and an unbiased final evaluation remain pending.
+
+The exact configurations are under
+[`configs/pair_highres_powerlaw_pt_or/`](configs/pair_highres_powerlaw_pt_or/),
+[`configs/pair_highres_powerlaw_pminus1/`](configs/pair_highres_powerlaw_pminus1/)
+and
+[`configs/pair_rep_raw_shower_pt_context/`](configs/pair_rep_raw_shower_pt_context/).
+The compact numerical summary is
+[`results/current_configurations.csv`](results/current_configurations.csv).
+
+## How to read an experiment
+
+Each configuration combines five separate choices. Changing one choice creates
+a new experiment, but does not necessarily create a new neural architecture.
+
+### Input representation
+
+This defines the information supplied to the network, such as coarse cells,
+the high-resolution EM2 image, shower summaries or measured pT. The
+implementations are in [`src/pair_features.py`](src/pair_features.py) and
+[`src/prepare_pair_data.py`](src/prepare_pair_data.py). The corresponding
+experiment groups are indexed in [`configs/README.md`](configs/README.md).
+
+### Neural architecture
+
+This defines how the network processes the inputs, for example with a shared
+MLP or a shared CNN. The implementations and model factory are in
+[`src/pair_models.py`](src/pair_models.py).
+
+### Training method
+
+This includes the target, loss, pair weighting, optimizer and checkpoint
+schedule. Training is implemented in [`src/pair_train.py`](src/pair_train.py),
+while each run records its exact choices in a JSON file under
+[`configs/`](configs/).
+
+### Event decision
+
+This defines how pair scores become one event decision. The standard neural
+decision uses the maximum pair score. Some controlled studies add a direct pT
+branch. Pair-to-event reconstruction is in
+[`src/pair_data.py`](src/pair_data.py), and the optional combined decision is
+in [`src/pair_classifiers.py`](src/pair_classifiers.py).
+
+### Calibration
+
+This defines how thresholds are chosen at a background-event false-positive
+rate no greater than 0.5%. The shared threshold rule is in
+[`src/operating_point.py`](src/operating_point.py), and cross-fitted checkpoint
+evaluation is in [`src/pair_evaluate.py`](src/pair_evaluate.py).
+
 ## Architecture in one pass
 
 1. Build the two member inputs for one same-event pair.
