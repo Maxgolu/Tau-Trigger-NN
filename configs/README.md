@@ -32,6 +32,13 @@ These controls are not current leading models.
 - `pair_high_resolution_em2/` and `pair_highres_*` contain the high-resolution
   EM2 studies and their controlled input variants.
 
+The seed-42 scalar/coarse screen covered 22 exact candidates across these
+families: raw coarse cells, per-layer summaries, compact EM2 measurements, EM2
+core measurements, the EM2 best-window fraction, individual layer-removal
+tests, and predefined detector-layer groups, with measured member pT included
+only where declared. The exact candidate names and decisions are recorded in
+[`../results/representation_reproduction/seed42_scalar_coarse_screen.csv`](../results/representation_reproduction/seed42_scalar_coarse_screen.csv).
+
 ## Output and fusion studies
 
 - [`pair_output_ordered_threeclass/`](pair_output_ordered_threeclass/) changes
@@ -42,7 +49,13 @@ These controls are not current leading models.
 ## Event-context studies
 
 - `pair_gain_*` isolates member pT, shower information and event context.
-- `pair_context_*` compares seven alternative measured-pT context summaries.
+- `pair_context_*` compares seven alternative measured-pT descriptions: total
+  event pT, highest pT outside the pair, total pT outside the pair, the pair's
+  fraction of event pT, top-four pT concentration, top-four pT entropy, and
+  pair sum plus balance. Top-four pT entropy is the Shannon entropy, in nats,
+  of the four selected TOBs' measured-pT fractions. A larger value means a more
+  even distribution; a smaller value means that pT is concentrated in fewer
+  TOBs.
 - `pair_highres_*_event_pt/` contains the high-resolution pT-factorial cells.
 
 ## Final-decision studies

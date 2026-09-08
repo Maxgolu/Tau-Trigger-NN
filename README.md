@@ -21,9 +21,13 @@ evaluation code explicitly converts it.
 
 ## Start here: current leading configurations
 
-The table below lists the strongest configurations observed so far. They are
-validation results, not final models. The high-resolution rows use the same
-learned architecture and differ in their final event decision.
+The table below lists the strongest configurations found so far. We have not
+yet selected the final model or confirmed its performance on untouched data.
+
+Here, high-resolution means that the network processes each TOB's detailed
+12x12 EM2 calorimeter image in addition to its other measurements. The two
+high-resolution rows use the same learned architecture and differ only in their
+final event decision.
 
 | Role | Input and architecture | Event decision | Mean validation efficiency |
 | --- | --- | --- | ---: |
@@ -103,9 +107,11 @@ evaluation is in [`src/pair_evaluate.py`](src/pair_evaluate.py).
 5. Compare that event score with the model's independently calibrated event
    threshold.
 
-The representation changes step 1; the member encoder and pair head define the
-learned model. `src/pair_data.py` and `src/pair_validate.py` implement the
-pair-to-event and validation contracts.
+Changing the representation changes the information supplied for each TOB. The
+shared encoder converts each TOB into a small learned summary. The
+pair-combining network uses the two summaries to produce one pair score.
+`src/pair_data.py` handles pair construction and event scoring, while
+`src/pair_validate.py` runs the validation procedure.
 
 ### Deterministic baseline
 
@@ -128,16 +134,16 @@ receive a non-passing score of negative infinity.
 
 ### Operational labels and populations
 
-Each TOB has a verified binary operational label. A pair receives:
+Each TOB retains the original tau/background label. A pair is positive when
+both of its TOBs are tau-labelled. The code also supports the corresponding
+three-class label:
 
 ```text
 three-class label = label_i + label_j       # 0, 1, or 2
 binary label      = 1 when both labels are 1
 ```
 
-These labels count positively labelled TOB rows. The available export does not
-contain a unique generator-particle identity, so a label-2 pair must not be
-described as two verified distinct generator-level taus.
+The stored labels do not provide separate generator-particle identities.
 
 The audited source inventory contains:
 
@@ -170,33 +176,10 @@ measured pT, and its strongest-3x3 EM2 energy fraction. The event's
 second-highest measured pT is appended once at the pair head, not once per
 member.
 
-The current controlled context study keeps those calorimeter inputs fixed and
-changes only the measured-pT description supplied to the pair model. Its seven
-predeclared alternatives are: total event pT, maximum or total pT outside the
-pair, the pair's fraction of event pT, top-four pT concentration, top-four pT
-entropy, and pair sum plus balance. Entropy here is the Shannon entropy, in
-nats, of the top-four measured-pT fractions; it is the precise implementation
-of the deck's informal “top-four pT spread” label. The final alternative removes the two
-member-pT scalar slots and supplies pair sum and balance at the pair head. The
-implementation is in `src/pair_context_features.py`; each alternative has
-separate seed-42, seed-123 and seed-456 configurations under
-`configs/pair_context_*/`.
-
-A separate scalar/coarse representation screen kept the pair model fixed while
-changing only its member inputs. It tested 22 representations with seed 42 and
-repeated three representative families with seeds 42, 123 and 456:
-
-```text
-45 coarse cells per member
-45 coarse cells plus measured member pT
-16 compact EM2 measurements plus measured member pT
-```
-
-These configurations use the same `d -> 32 -> 16` encoder for both members,
-combine the two embeddings through their sum and absolute difference, and use a
-`32 -> 16 -> 1` pair head. The compact result tables and plots are under
-`results/representation_reproduction/`. They are validation-only evidence; no
-test result is claimed.
+Controlled studies of input representation, event context, output formulation,
+fusion and final event decisions are indexed in
+[`configs/README.md`](configs/README.md). Their compact validation evidence is
+described in [`results/README.md`](results/README.md).
 
 ### Models and classifier decisions
 
