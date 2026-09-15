@@ -1,0 +1,5 @@
+model,seed,selected_epoch,inclusive_accepted,inclusive_total,inclusive_efficiency,high_energy_accepted,high_energy_total,delta_vs_complete_leader
+two_convolution_shared_encoder,42,4,3258,7307,0.4458738196,1302,1312,
+two_convolution_shared_encoder,123,18,3183,7307,0.4356096893,1298,1312,
+two_convolution_shared_encoder,456,14,3278,7307,0.4486109210,1300,1312,
+two_convolution_shared_encoder,mean,,,,0.4433648100,,,-0.0023265362

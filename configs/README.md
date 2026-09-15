@@ -6,15 +6,18 @@ The folder name alone should not be interpreted as a distinct architecture.
 
 ## Current leading configurations
 
-- [`pair_highres_powerlaw_pt_or/`](pair_highres_powerlaw_pt_or/) contains the
-  current overall validation leader: the shared high-resolution network with a
-  jointly calibrated direct pT branch.
+- [`pair_highres_two_channel_pt_or/`](pair_highres_two_channel_pt_or/) contains
+  the current overall validation leader: absolute and signed-normalized EM2
+  image channels with a jointly calibrated direct pT branch.
+- [`pair_deeper_shared_encoder/`](pair_deeper_shared_encoder/) contains the
+  controlled two-convolution encoder comparison.
 - [`pair_highres_powerlaw_pminus1/`](pair_highres_powerlaw_pminus1/) contains
   the same learned architecture evaluated with a neural-only event decision.
 - [`pair_rep_raw_shower_pt_context/`](pair_rep_raw_shower_pt_context/) contains
   the compact shared-MLP comparison.
 
-Each folder contains separate configurations for seeds 42, 123 and 456.
+Every study declares seeds 42, 123 and 456, either in one shared configuration
+or in three seed-specific files.
 
 ## Diagnostic controls
 
@@ -39,6 +42,16 @@ tests, and predefined detector-layer groups, with measured member pT included
 only where declared. The exact candidate names and decisions are recorded in
 [`../results/representation_reproduction/seed42_scalar_coarse_screen.csv`](../results/representation_reproduction/seed42_scalar_coarse_screen.csv).
 
+The completed clean representation evidence is in
+[`../results/clean_representation/summary.csv`](../results/clean_representation/summary.csv).
+
+## Feature-source ablations
+
+The `pair_source_ablation_*` folders remove one declared source at a time from
+the current high-resolution input. These are meaningful negative experiments,
+not alternative final models. Their compact result table is
+[`../results/source_ablation/summary.csv`](../results/source_ablation/summary.csv).
+
 ## Output and fusion studies
 
 - [`pair_output_ordered_threeclass/`](pair_output_ordered_threeclass/) changes
@@ -62,8 +75,8 @@ only where declared. The exact candidate names and decisions are recorded in
 
 - [`pair_raw_cell_or/`](pair_raw_cell_or/) tests a direct measured-pT branch
   with the raw-cell model.
-- [`pair_highres_powerlaw_pt_or/`](pair_highres_powerlaw_pt_or/) applies the
-  same type of combined event decision to the current high-resolution leader.
+- [`pair_highres_powerlaw_pt_or/`](pair_highres_powerlaw_pt_or/) records the
+  earlier one-image-channel combined-decision study.
 
 All tracked performance evidence is validation-only. See
 [`../results/README.md`](../results/README.md) for result scope and limitations.

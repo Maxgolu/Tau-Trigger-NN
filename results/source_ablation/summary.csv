@@ -1,0 +1,6 @@
+configuration,removed_information,trainable_parameters,mean_inclusive_efficiency,delta_vs_baseline,delta_vs_complete_leader,promoted
+no_image,12x12_EM2_image,2673,0.4284476073,0.0845308152,-0.0172437389,false
+no_fraction,best_3x3_fraction,4341,0.4437297569,0.0998129647,-0.0019615893,false
+no_coarse_cells,45_coarse_cells,3637,0.4265772547,0.0826604626,-0.0191140915,false
+image_and_pt_only,coarse_cells_and_fraction,3621,0.4233383514,0.0794215592,-0.0223529948,false
+coarse_cells_and_pt_only,image_and_fraction,2657,0.4289950276,0.0850782355,-0.0166963186,false

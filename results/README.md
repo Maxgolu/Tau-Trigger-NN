@@ -8,15 +8,30 @@ The bundle contains only the controlled studies completed so far. It will be
 extended as the research programme continues; it is not a comprehensive final
 result release.
 
+The latest controlled evidence is summarized in:
+
+- `current_configurations.csv`: current leading configurations;
+- `high_resolution_two_channel/summary.csv`: per-seed counts for the current
+  two-channel leader;
+- `source_ablation/summary.csv`: five removals from the complete input;
+- `clean_representation/summary.csv`: four smaller input representations;
+- `shared_encoder/summary.csv`: the compatible two-convolution comparison.
+- `plots/latest_controlled_comparisons.png`: a presentation-ready view of the
+  same recent comparisons.
+
+“Inclusive efficiency” is the number of accepted validation signal-sample
+events divided by all 7,307 validation signal-sample events. Each learned seed
+has its own event threshold, calibrated at no more than 0.5% background-event
+false-positive rate.
+
 The raw-OR, high-resolution-OR, pT-factorial and pT-context groups are
 **adaptive validation evidence**. They have not passed protected confirmation
 and must not be read as final promoted-model or blind-test results. Protected
 confirmation and the final unbiased evaluation remain planned work.
 
-- `current_configurations.csv` is the compact entry point for the three current
+- `current_configurations.csv` is the compact entry point for the current
   reference configurations. It distinguishes input representation, neural
-  architecture and final event decision. The first two rows use the same
-  learned architecture with different event decisions.
+  architecture and final event decision.
 
 - `data_summary.json` records the source filenames and CSV hashes, fixed sample
   and pair counts, input units, and the operational-label limitation used by

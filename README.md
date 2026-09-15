@@ -25,14 +25,14 @@ The table below lists the strongest configurations found so far. We have not
 yet selected the final model or confirmed its performance on untouched data.
 
 Here, high-resolution means that the network processes each TOB's detailed
-12x12 EM2 calorimeter image in addition to its other measurements. The two
-high-resolution rows use the same learned architecture and differ only in their
-final event decision.
+12x12 EM2 calorimeter image. The current leader supplies both the absolute
+image and a signed, energy-normalized copy to one shared member CNN.
 
 | Role | Input and architecture | Event decision | Mean validation efficiency |
 | --- | --- | --- | ---: |
-| Current overall leader | Shared high-resolution EM2 CNN with coarse cells, shower fraction and measured pT | Neural score OR direct pT branch | 44.76% |
-| High-resolution neural-only comparison | Same shared high-resolution network | Maximum neural pair score | 44.09% |
+| Current overall leader | Shared two-channel EM2 CNN with coarse cells, shower fraction and measured pT | Neural score OR direct pT branch | 44.57% |
+| Deeper compatible encoder | Same inputs with two convolutional layers | Neural score OR direct pT branch | 44.34% |
+| Earlier neural-only comparison | One-channel high-resolution network | Maximum neural pair score | 44.09% |
 | Compact comparison | Shared MLP with EM2 dominance, shower fraction and measured pT | Maximum neural pair score | 42.46% |
 
 For each seed, efficiency is the number of validation signal-sample events
@@ -46,7 +46,8 @@ rule. These efficiencies are adaptive validation evidence. Protected
 confirmation and an unbiased final evaluation remain pending.
 
 The exact configurations are under
-[`configs/pair_highres_powerlaw_pt_or/`](configs/pair_highres_powerlaw_pt_or/),
+[`configs/pair_highres_two_channel_pt_or/`](configs/pair_highres_two_channel_pt_or/),
+[`configs/pair_deeper_shared_encoder/`](configs/pair_deeper_shared_encoder/),
 [`configs/pair_highres_powerlaw_pminus1/`](configs/pair_highres_powerlaw_pminus1/)
 and
 [`configs/pair_rep_raw_shower_pt_context/`](configs/pair_rep_raw_shower_pt_context/).
@@ -169,7 +170,7 @@ The pair modules support the representations implemented in this branch:
 | Raw cells with pT | Member-local cells and pT, 92 values |
 | Layer summaries | 16 summaries from each member, 32 values |
 | Layer summaries with pT | Member-local summaries and pT, 34 values |
-| High-resolution EM2 | Shared processing of each member's 12x12 EM2 image and 47 scalar values |
+| High-resolution EM2 | Shared processing of each member's absolute and signed-normalized 12x12 EM2 images and 47 scalar values |
 
 The 47 high-resolution member scalars are the 45 coarse cells, the member's
 measured pT, and its strongest-3x3 EM2 energy fraction. The event's
@@ -188,11 +189,33 @@ study:
 
 - `PairPtMLP`: `2 -> 8 -> 1`, 33 trainable parameters.
 - `FlatRawPairMLP`: `90 -> 32 -> 16 -> 1`, 3,457 parameters.
-- `SharedHighResolutionPairModel`: shared member encoders followed by a
-  configurable pair head. The standard 47-scalar/one-context form uses
-  `33 -> 32 -> 16 -> 1` and has 4,321 parameters. The pair-sum/balance form
+- `SharedHighResolutionPairModel`: configurable one- or two-layer shared CNN
+  member encoders followed by a pair head. The current two-image-channel,
+  47-scalar/one-context form uses `33 -> 32 -> 16 -> 1` and has 4,357
+  parameters. The older one-image-channel form has 4,321 parameters. The pair-sum/balance form
   uses 46 member scalars and three context values, giving
   `35 -> 32 -> 16 -> 1` and 4,369 parameters.
+
+The signed normalized EM2 channel is
+`E / max(sum(abs(E)), 1 MeV)`. It describes shower shape while the absolute
+channel retains the energy scale.
+
+### Latest controlled conclusions
+
+Five source-removal experiments and four clean representation comparisons were
+run with the same validation procedure. Every source-removal model remained
+above the deterministic baseline, but none beat the complete two-channel
+leader. The closest ablation removed only the engineered best-3x3 fraction and
+was 0.20 percentage points lower. The four clean representations were also
+lower, so none was promoted.
+
+A compatible two-convolution shared encoder was then tested with the leader's
+inputs and pair interface held fixed. It reached 44.34% mean inclusive
+validation efficiency, 0.23 percentage points below the one-convolution
+leader, and was not selected. Compact summaries are in
+[`results/source_ablation/`](results/source_ablation/),
+[`results/clean_representation/`](results/clean_representation/) and
+[`results/shared_encoder/`](results/shared_encoder/).
 
 `src/pair_classifiers.py` provides the joint-calibration primitive for combining
 a neural pair decision with a measured-pT decision under one background budget:

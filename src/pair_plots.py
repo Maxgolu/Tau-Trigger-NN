@@ -631,6 +631,73 @@ def plot_representation_reproduction_regions(
     return _finish(fig, output_dir / "representation_reproduction_energy_regions.png")
 
 
+def plot_latest_controlled_comparisons(
+    results_dir: Path, output_dir: Path
+) -> Path:
+    """Show the current leader beside the closest recent controlled results."""
+    current = _read_rows(
+        results_dir / "current_configurations.csv",
+        ("role", "mean_inclusive_signal_efficiency", "baseline_efficiency"),
+    )
+    leader = next(row for row in current if row["role"] == "current_overall_leader")
+    ablations = _read_rows(
+        results_dir / "source_ablation" / "summary.csv",
+        ("removed_information", "mean_inclusive_efficiency"),
+    )
+    representations = _read_rows(
+        results_dir / "clean_representation" / "summary.csv",
+        ("representation", "mean_inclusive_efficiency"),
+    )
+    encoders = _read_rows(
+        results_dir / "shared_encoder" / "summary.csv",
+        ("model", "seed", "inclusive_efficiency"),
+    )
+    closest_ablation = max(
+        ablations, key=lambda row: float(row["mean_inclusive_efficiency"])
+    )
+    best_compact = max(
+        representations, key=lambda row: float(row["mean_inclusive_efficiency"])
+    )
+    deeper = next(row for row in encoders if row["seed"] == "mean")
+    labels = [
+        "pT baseline",
+        "Best compact\nrepresentation",
+        "Two-layer\nencoder",
+        "Closest source\nablation",
+        "Complete\nleader",
+    ]
+    values = [
+        float(leader["baseline_efficiency"]),
+        float(best_compact["mean_inclusive_efficiency"]),
+        float(deeper["inclusive_efficiency"]),
+        float(closest_ablation["mean_inclusive_efficiency"]),
+        float(leader["mean_inclusive_signal_efficiency"]),
+    ]
+    plt = _pyplot()
+    fig, ax = plt.subplots(figsize=(10.2, 5.2))
+    colors = ["#7b8188", "#7a63a8", "#2f74b5", "#1f9e89", "#e07a2d"]
+    bars = ax.bar(range(len(values)), [100 * value for value in values], color=colors)
+    ax.bar_label(bars, labels=[f"{100 * value:.2f}%" for value in values], padding=4)
+    ax.set_xticks(range(len(labels)), labels)
+    ax.set(
+        title="Recent controlled alternatives did not replace the complete leader",
+        ylabel="Inclusive validation signal efficiency (%)",
+        ylim=(30, 48),
+    )
+    ax.grid(axis="y", alpha=0.2)
+    fig.text(
+        0.99,
+        0.015,
+        "Three-seed means · independently calibrated at ≤0.5% background-event FPR\n"
+        "Validation only · protected confirmation pending",
+        ha="right",
+        color="#666666",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    return _finish(fig, output_dir / "latest_controlled_comparisons.png")
+
+
 PLOTS = {
     "training-curves": plot_training_curves,
     "checkpoint-selection": plot_checkpoint_selection,
@@ -647,6 +714,7 @@ PLOTS = {
     "pt-context-ranking": plot_pt_context_ranking,
     "representation-reproduction-global": plot_representation_reproduction_global,
     "representation-reproduction-regions": plot_representation_reproduction_regions,
+    "latest-controlled-comparisons": plot_latest_controlled_comparisons,
 }
 
 

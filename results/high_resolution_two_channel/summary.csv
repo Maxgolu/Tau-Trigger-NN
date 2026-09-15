@@ -1,0 +1,5 @@
+seed,inclusive_accepted,inclusive_total,inclusive_efficiency,high_energy_accepted,high_energy_total,background_accepted,background_total,background_fpr
+42,3304,7307,0.4521691529,1304,1312,124,24835,0.0049929535
+123,3220,7307,0.4406733269,1298,1312,124,24835,0.0049929535
+456,3246,7307,0.4442315588,1303,1312,124,24835,0.0049929535
+mean,,,0.4456913462,,,,,

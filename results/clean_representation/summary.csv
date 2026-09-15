@@ -1,0 +1,5 @@
+representation,pair_input_width,mean_inclusive_efficiency,delta_vs_baseline,delta_vs_complete_leader,strict_all_energy_vs_baseline,promoted
+raw_coarse_cells,90,0.4003923179,0.0564755258,-0.0452990283,true,false
+raw_coarse_cells_plus_member_pt,92,0.3982026367,0.0542858446,-0.0474887095,true,false
+layer_summaries,32,0.4053191004,0.0614023083,-0.0403722458,true,false
+layer_summaries_plus_member_pt,34,0.4095159892,0.0655991971,-0.0361753570,false,false
