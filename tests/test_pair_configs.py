@@ -10,7 +10,7 @@ from prepare_pair_data import preparation_contract
 
 
 class PairConfigTests(unittest.TestCase):
-    def test_every_pair_config_is_single_seed_and_runnable(self):
+    def test_every_pair_config_declares_supported_seeds_and_is_runnable(self):
         allowed_representations = {
             "pair_pt",
             "raw_cells",
@@ -25,14 +25,25 @@ class PairConfigTests(unittest.TestCase):
             "member_compact_em2_pt",
         }
         paths = sorted((ROOT / "configs").glob("pair_*/*.json"))
-        self.assertEqual(len(paths), 87)
+        self.assertEqual(len(paths), 94)
         seen = {}
         for path in paths:
             config = json.loads(path.read_text(encoding="utf-8"))
-            self.assertIn(config["seed"], {42, 123, 456})
-            self.assertNotIn("seeds", config)
-            self.assertEqual(path.parent.name, config["experiment_name"])
-            self.assertTrue(path.stem.endswith(f"_s{config['seed']}"))
+            declared_seeds = (
+                {config["seed"]}
+                if "seed" in config
+                else set(config.get("seeds", ()))
+            )
+            self.assertTrue(declared_seeds)
+            self.assertTrue(declared_seeds.issubset({42, 123, 456}))
+            if "seed" in config or path.name == "config.json":
+                self.assertEqual(path.parent.name, config["experiment_name"])
+            else:
+                self.assertIn(path.stem, config["experiment_name"])
+            if "seed" in config:
+                self.assertTrue(path.stem.endswith(f"_s{config['seed']}"))
+            elif path.parent.name == config["experiment_name"]:
+                self.assertEqual(path.name, "config.json")
             self.assertIn(config["representation"], allowed_representations)
             preparation_contract(config)
             model = build_pair_model(config)
@@ -46,8 +57,8 @@ class PairConfigTests(unittest.TestCase):
             self.assertIn(loss_name, {"bce", "cross_entropy"})
             if loss_name == "cross_entropy":
                 self.assertEqual(config["model"]["output_classes"], 3)
-            seen.setdefault(config["experiment_name"], set()).add(config["seed"])
-        self.assertEqual(len(seen), 29)
+            seen.setdefault(config["experiment_name"], set()).update(declared_seeds)
+        self.assertEqual(len(seen), 36)
         self.assertTrue(all(seeds == {42, 123, 456} for seeds in seen.values()))
 
 

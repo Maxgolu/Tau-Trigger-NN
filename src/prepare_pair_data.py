@@ -16,6 +16,7 @@ try:
     )
     from .pair_data import build_pair_dataset
     from .pair_features import (
+        absolute_and_normalized_em2,
         compact_em2_member_features,
         em2_best_3x3_fraction,
         member_summary_features,
@@ -32,6 +33,7 @@ except ImportError:
     )
     from pair_data import build_pair_dataset
     from pair_features import (
+        absolute_and_normalized_em2,
         compact_em2_member_features,
         em2_best_3x3_fraction,
         member_summary_features,
@@ -217,6 +219,9 @@ def _representation_arrays(
     context_features=None,
     include_member_pt=True,
     include_event_pt=True,
+    image_channels=("absolute",),
+    include_coarse_cells=True,
+    include_fraction=True,
 ):
     left_core = left[CORE_COLUMNS].to_numpy(dtype=np.float32).reshape(-1, 5, 3, 3)
     right_core = right[CORE_COLUMNS].to_numpy(dtype=np.float32).reshape(-1, 5, 3, 3)
@@ -286,10 +291,15 @@ def _representation_arrays(
         left_fraction = em2_best_3x3_fraction(left_em2)[:, None]
         right_fraction = em2_best_3x3_fraction(right_em2)[:, None]
         def member_scalars(core, pt, fraction):
-            parts = [core.reshape(-1, 45)]
+            parts = []
+            if include_coarse_cells:
+                parts.append(core.reshape(-1, 45))
             if include_member_pt:
                 parts.append(pt[:, None])
-            parts.append(fraction)
+            if include_fraction:
+                parts.append(fraction)
+            if not parts:
+                raise ValueError("high-resolution member scalars cannot be empty")
             return np.concatenate(parts, axis=1)
 
         scalars = np.stack(
@@ -314,8 +324,18 @@ def _representation_arrays(
             added = select_context_features(mapped, context_features)
             parts = ([baseline_context] if include_event_pt else []) + [added]
             context = np.concatenate(parts, axis=1)
+        absolute_images = np.stack([left_em2, right_em2], axis=1)
+        channel_names = tuple(image_channels)
+        if channel_names == ("absolute",):
+            images = absolute_images
+        elif channel_names == ("absolute", "signed_normalized"):
+            images = absolute_and_normalized_em2(absolute_images)
+        elif channel_names == ():
+            images = np.empty((len(pairs), 0), dtype=np.float32)
+        else:
+            raise ValueError("unsupported high-resolution image channel declaration")
         return {
-            "images": np.stack([left_em2, right_em2], axis=1),
+            "images": images,
             "scalars": scalars.astype(np.float32),
             "context": context,
         }
@@ -331,6 +351,9 @@ def prepare_pair_split(
     context_features=None,
     include_member_pt=True,
     include_event_pt=True,
+    image_channels=("absolute",),
+    include_coarse_cells=True,
+    include_fraction=True,
     include_member_min_truth_pt_gev=False,
     split_seed=42,
     max_events_per_class=None,
@@ -395,6 +418,9 @@ def prepare_pair_split(
         context_features=context_features,
         include_member_pt=include_member_pt,
         include_event_pt=include_event_pt,
+        image_channels=image_channels,
+        include_coarse_cells=include_coarse_cells,
+        include_fraction=include_fraction,
     )
     arrays.update(
         {
@@ -494,13 +520,25 @@ def preparation_contract(config):
         raise ValueError("energy-weighted config must declare member_min_truth_pt_gev")
     if representation == "high_resolution_em2":
         model = config.get("model", {})
-        expected_scalar_width = 47 if include_member_pt else 46
+        include_coarse_cells = bool(config.get("include_coarse_cells", True))
+        include_fraction = bool(config.get("include_fraction", True))
+        image_channels = tuple(config.get("image_channels", ["absolute"]))
+        expected_scalar_width = (
+            45 * int(include_coarse_cells)
+            + int(include_member_pt)
+            + int(include_fraction)
+        )
         expected_context_width = int(include_event_pt)
         if model.get("name") == "shared_member_high_resolution_em2":
-            if int(model.get("member_scalar_width", expected_scalar_width)) != expected_scalar_width:
+            declared_scalar_width = int(
+                model.get("member_scalar_width", expected_scalar_width)
+            )
+            if declared_scalar_width != expected_scalar_width:
                 raise ValueError("model member_scalar_width disagrees with the representation")
             if int(model.get("context_width", expected_context_width)) != expected_context_width:
                 raise ValueError("model context_width disagrees with the representation")
+            if int(model.get("image_channels", len(image_channels))) != len(image_channels):
+                raise ValueError("model image_channels disagrees with the representation")
     return (
         representation,
         member_features,
@@ -573,6 +611,9 @@ def main():
     include_member_pt = True
     include_event_pt = True
     include_truth = False
+    image_channels = ("absolute",)
+    include_coarse_cells = True
+    include_fraction = True
     representation = args.representation
     if args.config:
         config = json.loads(Path(args.config).read_text(encoding="utf-8"))
@@ -587,6 +628,9 @@ def main():
             config,
             args.split,
         )
+        image_channels = tuple(config.get("image_channels", ["absolute"]))
+        include_coarse_cells = bool(config.get("include_coarse_cells", True))
+        include_fraction = bool(config.get("include_fraction", True))
     arrays = prepare_pair_split(
         args.data_dir,
         split=args.split,
@@ -595,6 +639,9 @@ def main():
         context_features=context_features,
         include_member_pt=include_member_pt,
         include_event_pt=include_event_pt,
+        image_channels=image_channels,
+        include_coarse_cells=include_coarse_cells,
+        include_fraction=include_fraction,
         include_member_min_truth_pt_gev=include_truth,
         split_seed=args.split_seed,
         max_events_per_class=args.max_events_per_class,

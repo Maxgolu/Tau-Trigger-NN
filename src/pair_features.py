@@ -9,6 +9,7 @@ import numpy as np
 
 CORE_SHAPE = (5, 3, 3)
 EM2_SHAPE = (12, 12)
+NORMALIZED_EM2_FLOOR_MEV = 1.0
 SUMMARY_WIDTH = 16
 COMPACT_EM2_FEATURE_NAMES = (
     "em2_max1",
@@ -74,6 +75,35 @@ def em2_best_3x3_fraction(em2):
     total = image.sum(axis=(-2, -1))
     result = np.zeros_like(total, dtype=np.float32)
     np.divide(best, total, out=result, where=np.abs(total) > 1e-12)
+    return result
+
+
+def signed_normalized_em2(em2):
+    """Return the signed EM2 shower shape used by the two-channel model.
+
+    Every member image is divided by ``max(sum(abs(E)), 1 MeV)``.  The
+    absolute-energy image is kept separately; this channel describes only how
+    that energy is distributed spatially.
+    """
+    image = _validated_array(em2, EM2_SHAPE, "em2")
+    denominator = np.maximum(
+        np.abs(image.astype(np.float64)).sum(axis=(-2, -1), dtype=np.float64),
+        NORMALIZED_EM2_FLOOR_MEV,
+    )
+    result = (
+        image.astype(np.float64) / denominator[..., None, None]
+    ).astype(np.float32)
+    if not np.isfinite(result).all():
+        raise ValueError("normalized EM2 image contains a non-finite value")
+    return result
+
+
+def absolute_and_normalized_em2(em2):
+    """Stack the unchanged absolute image and its signed normalized shape."""
+    image = _validated_array(em2, EM2_SHAPE, "em2")
+    result = np.stack((image, signed_normalized_em2(image)), axis=-3)
+    if not np.array_equal(result[..., 0, :, :], image):
+        raise RuntimeError("absolute EM2 channel changed during stacking")
     return result
 
 

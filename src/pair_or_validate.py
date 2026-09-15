@@ -635,19 +635,27 @@ def load_prediction_directory(path):
 
 
 def load_or_configs(path):
-    """Load per-seed OR configs and require one identical validation contract."""
+    """Load OR configs and require one identical validation contract."""
     files = sorted(Path(path).glob("*.json"))
     if not files:
         raise FileNotFoundError(f"no OR configuration files found in {path}")
-    configs = [json.loads(file.read_text(encoding="utf-8")) for file in files]
+    configs = []
+    for file in files:
+        config = json.loads(file.read_text(encoding="utf-8"))
+        seeds = [config["seed"]] if "seed" in config else config.get("seeds")
+        if not seeds:
+            raise KeyError(f"{file} does not define any seeds")
+        configs.extend(dict(config, seed=int(seed)) for seed in seeds)
     seeds = [int(config["seed"]) for config in configs]
     if len(seeds) != len(set(seeds)):
         raise ValueError("OR configuration seeds must be unique")
     reference = dict(configs[0])
     reference.pop("seed")
+    reference.pop("seeds", None)
     for config in configs[1:]:
         candidate = dict(config)
         candidate.pop("seed")
+        candidate.pop("seeds", None)
         if candidate != reference:
             raise ValueError("per-seed OR validation settings must be identical")
     return configs, reference["validation"]

@@ -68,6 +68,51 @@ class PairModelTests(unittest.TestCase):
         )
         self.assertEqual(model.pair_head[0].in_features, 33)
 
+    def test_current_two_channel_high_resolution_model(self):
+        model = SharedHighResolutionPairModel(image_channels=2)
+        logits = model(
+            torch.randn(4, 2, 2, 12, 12),
+            torch.randn(4, 2, 47),
+            torch.randn(4, 1),
+        )
+        self.assertEqual(tuple(logits.shape), (4, 1))
+        self.assertEqual(count_parameters(model), 4_357)
+
+    def test_high_resolution_source_ablations_have_expected_sizes(self):
+        cases = (
+            (0, 47, 2_673),
+            (2, 46, 4_341),
+            (2, 2, 3_637),
+            (2, 1, 3_621),
+            (0, 46, 2_657),
+        )
+        for image_channels, scalar_width, expected in cases:
+            with self.subTest(
+                image_channels=image_channels,
+                scalar_width=scalar_width,
+                expected=expected,
+            ):
+                model = SharedHighResolutionPairModel(
+                    image_channels=image_channels,
+                    member_scalar_width=scalar_width,
+                )
+                self.assertEqual(count_parameters(model), expected)
+
+    def test_compatible_deeper_shared_encoder(self):
+        model = SharedHighResolutionPairModel(image_channels=2, image_depth=2)
+        logits = model(
+            torch.randn(3, 2, 2, 12, 12),
+            torch.randn(3, 2, 47),
+            torch.randn(3, 1),
+        )
+        self.assertEqual(tuple(logits.shape), (3, 1))
+        self.assertEqual(count_parameters(model), 4_221)
+        self.assertEqual(
+            sum(isinstance(module, torch.nn.Conv2d) for module in model.modules()),
+            2,
+        )
+
+
     def test_high_resolution_supports_pair_sum_balance_context(self):
         model = SharedHighResolutionPairModel(
             member_scalar_width=46,

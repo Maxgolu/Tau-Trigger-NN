@@ -17,20 +17,27 @@ except ImportError:
 
 
 def configured_runs(config_dir, experiments_dir):
-    """Resolve one experiment directory for each per-seed config."""
+    """Resolve one experiment directory for every declared model seed."""
     entries = []
     for config_path in sorted(Path(config_dir).glob("*.json")):
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        if "seed" not in config:
-            raise KeyError(f"{config_path} does not define one seed")
-        run_dir = (
-            Path(experiments_dir)
-            / config["experiment_name"]
-            / f"seed_{int(config['seed'])}"
-        )
-        entries.append((config_path, config, run_dir))
+        seeds = [config["seed"]] if "seed" in config else config.get("seeds")
+        if not seeds:
+            raise KeyError(f"{config_path} does not define any seeds")
+        for seed in seeds:
+            resolved = dict(config, seed=int(seed))
+            run_dir = (
+                Path(experiments_dir)
+                / config["experiment_name"]
+                / f"seed_{int(seed)}"
+            )
+            entries.append((config_path, resolved, run_dir))
     if not entries:
         raise ValueError("config directory contains no JSON files")
+    declared = [int(config["seed"]) for _, config, _ in entries]
+    if len(declared) != len(set(declared)):
+        raise ValueError("config directory declares a model seed more than once")
+    entries.sort(key=lambda entry: int(entry[1]["seed"]))
     return entries
 
 

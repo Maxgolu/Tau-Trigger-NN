@@ -164,35 +164,66 @@ class SharedMemberPairMLP(nn.Module):
 class SharedHighResolutionPairModel(nn.Module):
     """Shared member encoder for high-resolution EM2 pair inputs.
 
-    Each member contributes a 12x12 EM2 image and either 46 scalar values
-    (45 coarse cells plus the strongest-3x3 EM2 fraction) or the same values
-    with measured member pT appended. The same image and scalar branches
-    process both members. Their two 16-value embeddings are concatenated with
-    the declared event-context vector and passed to a small pair head. A
-    zero-width context is supported for the controlled no-event-pT cell.
+    Each member can contribute zero, one, or two 12x12 EM2 image channels and
+    a declared scalar vector. The same image and scalar branches process both
+    members. Their two 16-value embeddings are concatenated with the declared
+    event-context vector and passed to a small pair head. This covers the
+    complete input, controlled source ablations, and the compatible two-layer
+    encoder comparison without changing the pair interface.
     """
 
-    def __init__(self, member_scalar_width=47, context_width=1):
+    def __init__(
+        self,
+        member_scalar_width=47,
+        context_width=1,
+        *,
+        image_channels=1,
+        image_depth=1,
+    ):
         super().__init__()
         self.member_scalar_width = int(member_scalar_width)
         self.context_width = int(context_width)
-        if self.member_scalar_width not in {46, 47}:
-            raise ValueError("member_scalar_width must be 46 or 47")
+        self.image_channels = int(image_channels)
+        self.image_depth = int(image_depth)
+        if self.member_scalar_width <= 0:
+            raise ValueError("member_scalar_width must be positive")
         if self.context_width < 0:
             raise ValueError("context_width must be nonnegative")
-        self.image_branch = nn.Sequential(
-            nn.Conv2d(1, 4, kernel_size=3),
-            nn.BatchNorm2d(4),
-            nn.LeakyReLU(0.1),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Flatten(),
-        )
+        if self.image_channels not in {0, 1, 2}:
+            raise ValueError("image_channels must be 0, 1, or 2")
+        if self.image_depth not in {1, 2}:
+            raise ValueError("image_depth must be 1 or 2")
+        if self.image_channels == 0 and self.image_depth != 1:
+            raise ValueError("an absent image branch cannot have depth two")
+        image_layers = []
+        image_width = 0
+        if self.image_channels:
+            image_layers.extend(
+                (
+                    nn.Conv2d(self.image_channels, 4, kernel_size=3),
+                    nn.BatchNorm2d(4),
+                    nn.LeakyReLU(0.1),
+                    nn.MaxPool2d(kernel_size=2),
+                )
+            )
+            image_width = 100
+            if self.image_depth == 2:
+                image_layers.extend(
+                    (
+                        nn.Conv2d(4, 8, kernel_size=3),
+                        nn.BatchNorm2d(8),
+                        nn.LeakyReLU(0.1),
+                    )
+                )
+                image_width = 72
+            image_layers.append(nn.Flatten())
+        self.image_branch = nn.Sequential(*image_layers)
         self.scalar_branch = nn.Sequential(
             nn.Linear(self.member_scalar_width, 16),
             nn.LeakyReLU(0.1),
         )
         self.member_projection = nn.Sequential(
-            nn.Linear(116, 16),
+            nn.Linear(image_width + 16, 16),
             nn.LeakyReLU(0.1),
         )
         self.pair_head = nn.Sequential(
@@ -217,23 +248,36 @@ class SharedHighResolutionPairModel(nn.Module):
                 nn.init.zeros_(module.bias)
 
     def encode_member(self, image, scalars):
-        if image.ndim != 3 or image.shape[1:] != (12, 12):
-            raise ValueError("member image must have shape (batch, 12, 12)")
+        if self.image_channels == 0:
+            if image is not None:
+                raise ValueError("image must be omitted when image_channels is zero")
+        elif self.image_channels == 1:
+            if image.ndim != 3 or image.shape[1:] != (12, 12):
+                raise ValueError("member image must have shape (batch, 12, 12)")
+            image = image.unsqueeze(1)
+        elif image.ndim != 4 or image.shape[1:] != (2, 12, 12):
+            raise ValueError("member image must have shape (batch, 2, 12, 12)")
         if scalars.ndim != 2 or scalars.shape[1] != self.member_scalar_width:
             raise ValueError(
                 f"member scalars must have shape (batch, {self.member_scalar_width})"
             )
-        if image.shape[0] != scalars.shape[0]:
+        if image is not None and image.shape[0] != scalars.shape[0]:
             raise ValueError("member image and scalar batches must match")
-        image_embedding = self.image_branch(image.unsqueeze(1))
         scalar_embedding = self.scalar_branch(scalars)
-        return self.member_projection(
-            torch.cat((image_embedding, scalar_embedding), dim=1)
-        )
+        member_parts = [scalar_embedding]
+        if image is not None:
+            member_parts.insert(0, self.image_branch(image))
+        return self.member_projection(torch.cat(member_parts, dim=1))
 
     def forward(self, images, scalars, context):
-        if images.ndim != 4 or images.shape[1:] != (2, 12, 12):
-            raise ValueError("images must have shape (batch, 2, 12, 12)")
+        if self.image_channels == 0:
+            if images.ndim != 2 or images.shape[1] != 0:
+                raise ValueError("images must have shape (batch, 0)")
+        elif self.image_channels == 1:
+            if images.ndim != 4 or images.shape[1:] != (2, 12, 12):
+                raise ValueError("images must have shape (batch, 2, 12, 12)")
+        elif images.ndim != 5 or images.shape[1:] != (2, 2, 12, 12):
+            raise ValueError("images must have shape (batch, 2, 2, 12, 12)")
         if scalars.ndim != 3 or scalars.shape[1:] != (2, self.member_scalar_width):
             raise ValueError(
                 "scalars must have shape "
@@ -248,8 +292,10 @@ class SharedHighResolutionPairModel(nn.Module):
         ):
             raise ValueError("image, scalar, and event-context batches must match")
 
-        left = self.encode_member(images[:, 0], scalars[:, 0])
-        right = self.encode_member(images[:, 1], scalars[:, 1])
+        left_image = None if self.image_channels == 0 else images[:, 0]
+        right_image = None if self.image_channels == 0 else images[:, 1]
+        left = self.encode_member(left_image, scalars[:, 0])
+        right = self.encode_member(right_image, scalars[:, 1])
         pair_input = torch.cat((left, right, context), dim=1)
         return self.pair_head(pair_input)
 
@@ -299,12 +345,19 @@ def build_pair_model(config):
         _require_declared_value(model_config, "member_embedding_width", 16)
         member_scalar_width = int(model_config.get("member_scalar_width", 47))
         context_width = int(model_config.get("context_width", 1))
+        image_channels = int(model_config.get("image_channels", 1))
+        image_depth = int(model_config.get("image_depth", 1))
         _require_declared_value(
             model_config,
             "pair_head",
             [32 + context_width, 32, 16, 1],
         )
-        model = SharedHighResolutionPairModel(member_scalar_width, context_width)
+        model = SharedHighResolutionPairModel(
+            member_scalar_width,
+            context_width,
+            image_channels=image_channels,
+            image_depth=image_depth,
+        )
         _require_declared_value(
             model_config,
             "trainable_parameters",

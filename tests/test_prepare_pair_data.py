@@ -95,6 +95,36 @@ class PairPreparationTests(unittest.TestCase):
         self.assertEqual(arrays["scalars"][0, 0, 45], 1.0)
         self.assertEqual(arrays["scalars"][0, 1, 45], 1.0)
 
+    def test_high_resolution_two_channel_mapping_keeps_absolute_image(self):
+        left = _member_frame(self.pairs, self.frame, "a")
+        right = _member_frame(self.pairs, self.frame, "b")
+        arrays = _representation_arrays(
+            "high_resolution_em2",
+            self.pairs,
+            left,
+            right,
+            self.events,
+            image_channels=("absolute", "signed_normalized"),
+        )
+        self.assertEqual(arrays["images"].shape, (1, 2, 2, 12, 12))
+        self.assertEqual(arrays["images"][0, 0, 0, 0, 0], 10.0)
+        self.assertEqual(arrays["images"][0, 0, 1, 0, 0], 1.0)
+
+    def test_high_resolution_source_ablation_can_remove_image_and_fraction(self):
+        left = _member_frame(self.pairs, self.frame, "a")
+        right = _member_frame(self.pairs, self.frame, "b")
+        arrays = _representation_arrays(
+            "high_resolution_em2",
+            self.pairs,
+            left,
+            right,
+            self.events,
+            image_channels=(),
+            include_fraction=False,
+        )
+        self.assertEqual(arrays["images"].shape, (1, 0))
+        self.assertEqual(arrays["scalars"].shape, (1, 2, 46))
+
     def test_high_resolution_context_can_replace_member_pt_with_pair_encoding(self):
         source = self.frame.loc[:, ["eventNumber", "tob_index", "tob_pt"]]
         left = _member_frame(self.pairs, self.frame, "a")

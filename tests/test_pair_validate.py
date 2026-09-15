@@ -23,20 +23,20 @@ class PairValidationRunnerTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             entries = configured_runs(configs, root / "experiments")
-            self.assertEqual([entry[1]["seed"] for entry in entries], [123, 42])
-            self.assertEqual(entries[0][2], root / "experiments/model/seed_123")
+            self.assertEqual([entry[1]["seed"] for entry in entries], [42, 123])
+            self.assertEqual(entries[0][2], root / "experiments/model/seed_42")
 
-    def test_empty_or_multiseed_config_is_rejected(self):
+    def test_empty_config_is_rejected_and_multiseed_config_is_expanded(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with self.assertRaises(ValueError):
                 configured_runs(root, root / "runs")
-            (root / "bad.json").write_text(
-                json.dumps({"experiment_name": "bad", "seeds": [42, 123]}),
+            (root / "shared.json").write_text(
+                json.dumps({"experiment_name": "shared", "seeds": [42, 123]}),
                 encoding="utf-8",
             )
-            with self.assertRaises(KeyError):
-                configured_runs(root, root / "runs")
+            entries = configured_runs(root, root / "runs")
+            self.assertEqual([entry[1]["seed"] for entry in entries], [42, 123])
 
     def test_small_multiseed_validation_workflow(self):
         """Exercise training, prediction, aggregation, and selection together."""

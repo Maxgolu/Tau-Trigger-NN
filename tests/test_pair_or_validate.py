@@ -227,6 +227,19 @@ class PairOrValidationTests(unittest.TestCase):
         self.assertEqual(settings["target_event_fpr"], 0.005)
         self.assertEqual(len(settings["pt_budget_grid"]), 11)
 
+    def test_one_shared_config_expands_all_model_seeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {
+                "experiment_name": "shared",
+                "seeds": [42, 123, 456],
+                "validation": {"target_event_fpr": 0.005},
+            }
+            Path(directory, "config.json").write_text(
+                json.dumps(config), encoding="utf-8"
+            )
+            configs, _ = load_or_configs(directory)
+            self.assertEqual([config["seed"] for config in configs], [42, 123, 456])
+
     def test_mismatched_per_seed_config_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             base = {

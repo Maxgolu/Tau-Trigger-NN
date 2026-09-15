@@ -18,31 +18,45 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 
 
 class CurrentConfigurationSummaryTests(unittest.TestCase):
-    def test_summary_points_to_three_complete_seed_families(self) -> None:
+    def test_summary_points_to_complete_seed_families(self) -> None:
         rows = _read_csv(SUMMARY_PATH)
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(rows), 4)
         for row in rows:
             config_dir = REPO_ROOT / row["config_directory"]
             self.assertTrue(config_dir.is_dir())
             configs = sorted(config_dir.glob("*.json"))
-            self.assertEqual(len(configs), 3)
-            seeds = {
-                int(json.loads(path.read_text(encoding="utf-8"))["seed"])
-                for path in configs
-            }
+            seeds = set()
+            for path in configs:
+                config = json.loads(path.read_text(encoding="utf-8"))
+                if "seed" in config:
+                    seeds.add(int(config["seed"]))
+                else:
+                    seeds.update(map(int, config["seeds"]))
             self.assertEqual(seeds, SEEDS)
             self.assertEqual(int(row["seed_count"]), 3)
-            self.assertEqual(
+            self.assertIn(
                 row["evidence_status"],
-                "adaptive_validation_confirmation_pending",
+                {
+                    "adaptive_validation_confirmation_pending",
+                    "adaptive_validation_not_promoted",
+                },
             )
 
     def test_summary_efficiencies_match_result_sources(self) -> None:
         rows = {row["configuration"]: row for row in _read_csv(SUMMARY_PATH)}
 
-        hybrid = _read_csv(
-            REPO_ROOT / "results/high_resolution_pt_or/validation_summary.csv"
-        )
+        leader = [
+            row
+            for row in _read_csv(
+                REPO_ROOT / "results/high_resolution_two_channel/summary.csv"
+            )
+            if row["seed"] != "mean"
+        ]
+        deeper = [
+            row
+            for row in _read_csv(REPO_ROOT / "results/shared_encoder/summary.csv")
+            if row["seed"] != "mean"
+        ]
         neural = [
             row
             for row in _read_csv(
@@ -60,10 +74,9 @@ class CurrentConfigurationSummaryTests(unittest.TestCase):
         )
 
         expected = {
-            "high_resolution_pair_with_pt_branch": sum(
-                float(row["inclusive_signal_efficiency"]) for row in hybrid
-            )
-            / len(hybrid),
+            "high_resolution_two_channel_pair_with_pt_branch": sum(
+                float(row["inclusive_efficiency"]) for row in leader
+            ) / len(leader),
             "high_resolution_pair_neural_only": sum(
                 float(row["inclusive_signal_efficiency"]) for row in neural
             )
@@ -71,6 +84,9 @@ class CurrentConfigurationSummaryTests(unittest.TestCase):
             "compact_shower_pair_neural_only": float(
                 compact["mean_inclusive_efficiency"]
             ),
+            "two_convolution_shared_encoder": sum(
+                float(row["inclusive_efficiency"]) for row in deeper
+            ) / len(deeper),
         }
 
         for name, mean_efficiency in expected.items():

@@ -96,9 +96,21 @@ def prepare_training_arrays(
             images = np.asarray(source["images"], dtype=np.float64)
             scalars = np.asarray(source["scalars"], dtype=np.float64)
             context = np.asarray(source["context"], dtype=np.float64)
-            if images.ndim != 4 or images.shape[1:] != (2, 12, 12):
-                raise ValueError("images must have shape (pairs, 2, 12, 12)")
-            scalar_width, context_width = high_resolution_widths or (47, 1)
+            widths = high_resolution_widths or (47, 1, 1)
+            if len(widths) == 2:
+                scalar_width, context_width = widths
+                image_channels = 1
+            else:
+                scalar_width, context_width, image_channels = widths
+            expected_image_shape = {
+                0: (0,),
+                1: (2, 12, 12),
+                2: (2, 2, 12, 12),
+            }.get(image_channels)
+            if expected_image_shape is None or images.shape[1:] != expected_image_shape:
+                raise ValueError(
+                    "images disagree with the configured high-resolution channels"
+                )
             if scalars.ndim != 3 or scalars.shape[1:] != (2, scalar_width):
                 raise ValueError(
                     f"scalars must have shape (pairs, 2, {scalar_width})"
@@ -107,22 +119,39 @@ def prepare_training_arrays(
                 raise ValueError(
                     f"context must have shape (pairs, {context_width})"
                 )
-            image_mean, image_scale = fit_zscore(
-                images.reshape(-1, 12, 12),
-                reject_zero_scale=True,
-            )
+            if image_channels == 0:
+                image_mean = np.empty((0,), dtype=np.float64)
+                image_scale = np.empty((0,), dtype=np.float64)
+                normalized_images = images.astype(np.float32)
+            else:
+                image_shape = (12, 12) if image_channels == 1 else (2, 12, 12)
+                image_mean, image_scale = fit_zscore(
+                    images.reshape((-1,) + image_shape),
+                    reject_zero_scale=True,
+                )
+                normalized_images = transform_zscore(
+                    images, image_mean, image_scale
+                )
             scalar_mean, scalar_scale = fit_zscore(
                 scalars.reshape(-1, scalar_width),
                 reject_zero_scale=True,
             )
-            context_mean, context_scale = fit_zscore(
-                context,
-                reject_zero_scale=True,
-            )
+            if context_width == 0:
+                context_mean = np.empty((0,), dtype=np.float64)
+                context_scale = np.empty((0,), dtype=np.float64)
+                normalized_context = context.astype(np.float32)
+            else:
+                context_mean, context_scale = fit_zscore(
+                    context,
+                    reject_zero_scale=True,
+                )
+                normalized_context = transform_zscore(
+                    context, context_mean, context_scale
+                )
             arrays = (
-                transform_zscore(images, image_mean, image_scale),
+                normalized_images,
                 transform_zscore(scalars, scalar_mean, scalar_scale),
-                transform_zscore(context, context_mean, context_scale),
+                normalized_context,
             )
             normalizer = {
                 "images_mean": image_mean,
@@ -227,6 +256,7 @@ def train_seed(config, pair_data_path, output_dir, seed):
         (
             int(model_config.get("member_scalar_width", 47)),
             int(model_config.get("context_width", 1)),
+            int(model_config.get("image_channels", 1)),
         )
         if model_config.get("name") == "shared_member_high_resolution_em2"
         else None

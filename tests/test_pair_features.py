@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.features import FEATURE_REGISTRY
 from src.pair_features import (
+    absolute_and_normalized_em2,
     COMPACT_EM2_FEATURE_NAMES,
     compact_em2_member_features,
     em2_best_3x3_fraction,
@@ -21,6 +22,20 @@ from src.pair_features import (
 
 
 class PairFeatureTests(unittest.TestCase):
+    def test_two_channel_em2_preserves_energy_and_adds_signed_shape(self):
+        image = np.zeros((2, 12, 12), dtype=np.float32)
+        image[0, 0, 0] = 3.0
+        image[0, 0, 1] = -1.0
+        image[1, 1, 1] = 0.5
+
+        result = absolute_and_normalized_em2(image)
+
+        self.assertEqual(result.shape, (2, 2, 12, 12))
+        np.testing.assert_array_equal(result[:, 0], image)
+        self.assertAlmostEqual(float(result[0, 1, 0, 0]), 0.75)
+        self.assertAlmostEqual(float(result[0, 1, 0, 1]), -0.25)
+        self.assertAlmostEqual(float(result[1, 1, 1, 1]), 0.5)
+
     def test_compact_em2_member_features_have_exact_order_and_goldens(self):
         image = np.zeros((12, 12), dtype=np.float32)
         image[0, 0] = 10.0

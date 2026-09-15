@@ -190,6 +190,42 @@ class PairTrainingTests(unittest.TestCase):
             self.assertEqual(normalizer["context_mean"].shape, (0,))
             np.testing.assert_array_equal(labels, [0.0, 1.0, 0.0, 1.0])
 
+    def test_two_channel_images_use_channel_specific_normalization(self):
+        rng = np.random.default_rng(23)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairs.npz"
+            np.savez(
+                path,
+                images=rng.normal(size=(5, 2, 2, 12, 12)).astype(np.float32),
+                scalars=rng.normal(size=(5, 2, 47)).astype(np.float32),
+                context=rng.normal(size=(5, 1)).astype(np.float32),
+                labels=np.array([0, 1, 0, 1, 0]),
+            )
+            arrays, _, normalizer = prepare_training_arrays(
+                path,
+                high_resolution_widths=(47, 1, 2),
+            )
+            self.assertEqual(arrays[0].shape, (5, 2, 2, 12, 12))
+            self.assertEqual(normalizer["images_mean"].shape, (2, 12, 12))
+
+    def test_absent_image_branch_preserves_empty_input(self):
+        rng = np.random.default_rng(29)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairs.npz"
+            np.savez(
+                path,
+                images=np.empty((5, 0), dtype=np.float32),
+                scalars=rng.normal(size=(5, 2, 46)).astype(np.float32),
+                context=rng.normal(size=(5, 1)).astype(np.float32),
+                labels=np.array([0, 1, 0, 1, 0]),
+            )
+            arrays, _, normalizer = prepare_training_arrays(
+                path,
+                high_resolution_widths=(46, 1, 0),
+            )
+            self.assertEqual(arrays[0].shape, (5, 0))
+            self.assertEqual(normalizer["images_mean"].shape, (0,))
+
     def test_small_training_run_writes_metrics_and_checkpoints(self):
         config = {
             "experiment_name": "smoke",
