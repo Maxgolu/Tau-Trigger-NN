@@ -1,11 +1,11 @@
 {
   "schema_version": "university-submission-final-system-v1",
-  "status": "release_candidate_uncommitted",
+  "status": "released",
   "candidate": "all_finite_equal_event",
   "repository_history": {
     "origin_main_base": "92a6edf60734db123cadc23626ce36c14b97b314",
     "pair_public_base": "424edf7ee5d773c43f2c049abade708680fbddfc",
-    "release_commit": null
+    "release_commit": "12bd9ee0a41a342bf691bce932ccda27654b43c1"
   },
   "file_bindings": {
     ".github/workflows/ci.yml": "444d8ec42591b9da68234e7cedc01326bb5059b4b76ede32c51c8a824ccaddf7",
