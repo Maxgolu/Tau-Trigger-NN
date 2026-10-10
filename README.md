@@ -1,4 +1,27 @@
-# Pair-Based Tau Trigger Classifier
+# TAUminator: Compact Neural Networks for Tau Triggering
+
+This repository is the complete university submission by Max Golubkov and
+Tamar Averbuch. It contains the full development of the project: the original
+single-object tau-classification framework, the subsequent event-level pair
+study, the unified report and presentation, and the reproducibility material
+used to verify the submitted results.
+
+## Submission contents
+
+- **Single-object study:** compact neural classifiers, input-representation
+  studies, loss functions, operating-point calibration and evaluation tools.
+- **Pair-model study:** joint processing of two same-event trigger objects,
+  event-balanced training, event-level calibration and comparison with the
+  deterministic measured-pT baseline.
+- **Report:** editable LaTeX source and the submitted PDF under [`paper/`](paper/).
+- **Presentation:** the delivered presentation and supporting research-history
+  material under [`presentation/`](presentation/).
+- **Reproducibility:** a data-free CPU demonstration, automated submission
+  verifier, tests, frozen configurations and compact result artifacts.
+
+The repository preserves the controlled experiments that led to the submitted
+systems. They provide research provenance; the frozen submission artifacts and
+results identified below are authoritative.
 
 ## Video demonstration
 
@@ -7,14 +30,15 @@
 [Watch the project demo on YouTube](https://youtu.be/ZXKG2rvxmxY) (1 min 48 s).
 [Download the MP4](demo/demo-atlas-tau.mp4) (1080p, 7.2 MB).
 
-## Overview
+## Project overview
 
-This branch extends the single-object tau-classification framework with an
-event-level pair model. The pair study asks whether two TOBs can be processed
-together to improve signal acceptance while keeping the background-event false
-positive rate at or below 0.5%.
+The project studies compact neural networks for tau identification in the
+Level-1 trigger. The first stage develops and evaluates classifiers for
+individual trigger objects (TOBs). The second stage asks whether processing two
+TOBs from the same event can improve signal-event acceptance while keeping the
+background-event false-positive rate at or below 0.5%.
 
-The final submitted event pipeline is fixed:
+The submitted pair-model event pipeline is fixed:
 
 1. Rank finite TOBs within each event by measured `tob_pt`.
 2. Retain every finite TOB; exact pT ties use increasing `tob_index`.
@@ -26,7 +50,26 @@ The final submitted event pipeline is fixed:
 Measured `tob_pt` remains in its raw source unit, MeV, until plotting or
 evaluation code explicitly converts it.
 
-## Start here: final submitted system
+## Single-object framework
+
+The first stage of the project studies compact classifiers for individual
+TOBs. Its implementation remains the foundation of the repository:
+
+- [`src/model.py`](src/model.py), [`src/features.py`](src/features.py) and
+  [`src/losses.py`](src/losses.py) define the models, representations and loss
+  functions;
+- [`src/train.py`](src/train.py), [`src/evaluate.py`](src/evaluate.py) and
+  [`src/checkpoint_selection.py`](src/checkpoint_selection.py) implement
+  training, evaluation and model selection;
+- [`src/operating_point.py`](src/operating_point.py) provides the shared
+  operating-point calibration used by both stages;
+- the original configuration families under [`configs/`](configs/) preserve
+  the controlled single-object experiments described in the report.
+
+The unified paper gives the motivation, experimental progression and results
+for this stage before introducing the event-level pair model.
+
+## Pair-model extension and submitted configuration
 
 The submitted candidate is `all_finite_equal_event`, configured in
 [`configs/pair_final_all_finite_equal_event/config.json`](configs/pair_final_all_finite_equal_event/config.json).
@@ -51,10 +94,10 @@ Run the data-free demonstration with:
 ./run_demo.sh
 ```
 
-The complete editable joint paper and its compiled review PDF are under
-[`paper/`](paper/). The source preserves Max's existing single-object work and
-integrates the final pair-object methodology, results, lessons, introduction,
-and reproducibility appendix.
+The complete editable joint paper and submitted PDF are under [`paper/`](paper/).
+They present the single-object study and pair-model extension as one research
+project, followed by shared conclusions, future directions and reproducibility
+material.
 
 The detailed 47-slide pair-study presentation, including its original speaker
 notes and public-reference lists, is preserved at
@@ -65,7 +108,7 @@ to distinguish that historical evidence from the frozen final-test result, and
 [`docs/CODE_TO_PRESENTATION.md`](docs/CODE_TO_PRESENTATION.md) for the
 claim-level code, report, and slide crosswalk.
 
-## Earlier controlled configurations
+## Pair-model development history
 
 The table below preserves the strongest validation-stage configurations that
 led to the final system. They are supporting experiments, not alternatives to
@@ -309,6 +352,12 @@ for the final unbiased evaluation.
 
 ```text
 src/
+  model.py              single-object neural architectures
+  features.py           single-object input representations
+  losses.py             weighted and constrained training objectives
+  train.py              single-object training
+  evaluate.py           single-object evaluation
+  operating_point.py    shared threshold calibration
   pair_data.py          deterministic selection, pairing, labels and aggregation
   pair_features.py      pair representations
   pair_context_features.py observable event/pair pT summaries
@@ -323,6 +372,9 @@ src/
   prepare_pair_data.py  pair-array preparation from the source CSV/NPZ files
 
 configs/
+  cnn_*/
+  mlp_*/
+  constrained_*/
   pair_pt_control/
   pair_raw_cells/
   pair_high_resolution_em2/
@@ -350,10 +402,9 @@ tests/
   test_pair_*.py
 ```
 
-The original single-object modules remain available because this branch starts
-from the existing framework. Pair-specific code uses the same separation of
-data preparation, features, models, training, calibration, evaluation and
-plotting.
+The repository contains both the single-object modules and the later pair-model
+modules. Both use the same separation of data preparation, features, models,
+training, calibration, evaluation and plotting.
 
 ## Data and dependencies
 
