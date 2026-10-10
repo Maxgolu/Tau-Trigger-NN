@@ -6,11 +6,10 @@ Max's existing source was preserved and the pair methodology, final result,
 lessons, future direction, introduction, and reproducibility appendix were
 integrated additively.
 
-The compiled review PDF is `tau_trigger_unified_report.pdf`. The current full
-scientific draft is 37 pages including references and appendices; the main text
-ends on page 11. This is the complete-content draft. Page-limit editing remains
-a separate review step and should move detail to appendices rather than remove
-scientific qualifications.
+The compiled review PDF is `tau_trigger_unified_report.pdf`. The final report
+is 37 pages including references and appendices. The main text ends on page 8,
+references begin on page 9 and appendices begin on page 10. Detailed material
+was moved to appendices without removing scientific qualifications.
 
 Overleaf build sequence:
 

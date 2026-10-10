@@ -165,8 +165,8 @@ def verify_numerical_contract() -> None:
 
     fprs = list(summary["background_fpr_by_seed"].values())
     fpr_range = f"{min(fprs) * 100:.4f}$--${max(fprs) * 100:.4f}"
-    require(fpr_range in results, "background FPR range drift")
-    require("$0.5\\%$ fake-rate limit" in compact(results), "the event fake-rate requirement is missing")
+    require(fpr_range in appendix, "background FPR range drift")
+    require("$0.5\\%$ fake-rate limit" in compact(appendix), "the event fake-rate requirement is missing")
     require(
         "final success criterion" in appendix and "It is not met" in appendix,
         "the failed final success criterion is not stated explicitly",
@@ -204,7 +204,7 @@ def verify_terminology_contract() -> None:
 
     introduction = compact(read("sections/01_introduction.tex"))
     require(
-        "Identifying tau particles is important" in introduction,
+        introduction.startswith("\\section{Introduction} \\label{sec:intro} The ATLAS Level-1 trigger must distinguish narrow tau deposits"),
         "the introduction no longer begins from the reader-facing physics problem",
     )
     require("Trigger Objects (TOBs)" in introduction, "TOB is used before being introduced")
@@ -227,7 +227,10 @@ def verify_original_preservation() -> None:
         tokens = compact(read(relative)).split()
         cursor = 0
         for block in blocks:
-            for token in block.split():
+            expected = block
+            for replacement in contract.get("preserved_block_replacements", {}).get(relative, []):
+                expected = expected.replace(replacement["original"], replacement["revised"])
+            for token in expected.split():
                 try:
                     cursor = tokens.index(token, cursor) + 1
                 except ValueError:
@@ -238,6 +241,29 @@ def verify_original_preservation() -> None:
     for relative, expected in contract["unchanged_files"].items():
         require(hashlib.sha256((PAPER / relative).read_bytes()).hexdigest() == expected,
                 f"Max's original file changed: {relative}")
+
+    for relative, binding in contract.get("appended_files", {}).items():
+        data = (PAPER / relative).read_bytes()
+        original_length = binding["original_byte_length"]
+        require(len(data) >= original_length, f"Max's original file was truncated: {relative}")
+        require(
+            hashlib.sha256(data[:original_length]).hexdigest() == binding["original_sha256"],
+            f"Max's original file prefix changed: {relative}",
+        )
+
+    for relative, binding in contract.get("approved_replacements", {}).items():
+        reconstructed = (PAPER / relative).read_text(encoding="utf-8")
+        for replacement in binding["replacements"]:
+            revised = replacement["revised"]
+            require(
+                reconstructed.count(revised) == 1,
+                f"approved report replacement is missing or ambiguous: {relative}: {revised}",
+            )
+            reconstructed = reconstructed.replace(revised, replacement["original"], 1)
+        require(
+            hashlib.sha256(reconstructed.encode("utf-8")).hexdigest() == binding["original_sha256"],
+            f"Max's original file changed beyond approved replacements: {relative}",
+        )
 
     relocations_by_source: dict[str, list[dict]] = {}
     for relocation in contract.get("relocations", []):
@@ -284,21 +310,25 @@ def verify_pair_clarifications() -> None:
     summary = json.loads(SUMMARY.read_text())
     results = compact(read("sections/05_results.tex"))
     appendix = compact(read("appendix/K_pair_object.tex"))
-    methodology = compact(read("sections/04_methodology.tex"))
     baseline = summary["baseline_background"]
     require(abs(baseline["fpr"] - baseline["accepted"] / baseline["denominator"]) < 1e-15,
             "baseline fake-rate arithmetic drift")
-    require(f"{baseline['fpr'] * 100:.4f}" in results, "baseline achieved fake rate missing")
-    require("not at matched achieved rates" in results, "achieved-rate distinction missing")
+    require(
+        f"{baseline['fpr'] * 100:.4f}" in results or f"{baseline['fpr'] * 100:.4f}" in appendix,
+        "baseline achieved fake rate missing",
+    )
+    require("not at matched achieved rates" in appendix, "achieved-rate distinction missing")
     require("conditional two-sided" in appendix and "discordant decisions $b+c$" in appendix,
             "conditional uncertainty definition missing")
     require(f"split seed {summary['data_split_seed']}" in appendix, "common pair data split missing")
-    require("first pair in deterministic pair order" in results, "regional representative-pair rule missing")
+    require("first pair in deterministic pair order" in appendix, "regional representative-pair rule missing")
     for n in summary["regional_signal_denominators"].values():
         require(f"{n:,}".replace(",", "{,}") in appendix, "regional sample size missing")
-    require(r"\mathcal{P}^{\mathrm{train}}_e" in methodology, "retained training-pair set missing")
-    # The rate-limit qualification occupies one sentence in the main text.
-    require(results.count("exceeded") == 1, "rate-limit qualification must be concise")
+    require(r"\mathcal{P}^{\mathrm{train}}_e" in appendix, "retained training-pair set missing")
+    require(
+        results.count("exceeded") + appendix.count("exceeded") == 1,
+        "rate-limit qualification must appear exactly once",
+    )
 
 def verify_historical_findings() -> None:
     """Recompute the added historical findings from the public result files."""

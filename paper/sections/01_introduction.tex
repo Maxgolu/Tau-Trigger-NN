@@ -2,36 +2,14 @@
 \section{Introduction}
 \label{sec:intro}
 % ============================================================================
-Identifying tau particles is important in studies of particles such as the
-Higgs and Z bosons. Many taus decay into a narrow spray of particles, which
-leaves a compact energy deposit in the ATLAS calorimeter. Ordinary jets of
-particles can leave a similar deposit, especially at low energy. A simple
-energy threshold therefore either accepts too much background or rejects useful
-tau candidates.
-
-The decision must be made while collision data are arriving. The Large Hadron
-Collider (LHC) produces proton collisions at \SI{40}{MHz}, far faster than
-ATLAS can store them. Its first-stage, or Level-1, trigger therefore keeps only
-a small fraction for later reconstruction~\cite{atlas_trigger_run3,atlas_phase1_tdr}.
-We study compact neural networks for the calorimeter Trigger Objects (TOBs)
-supplied by the electron Feature Extractor (eFEX). The target event fake rate is $0.5\%$: a useful model must retain more signal without
-accepting more background events.
-
-We first study models that score one TOB at a time. We test which detector
-inputs carry useful information, whether compact convolutional networks improve
-on fully connected networks, and how the classifier and loss can protect the required efficiency
-across the energy range. We then ask a different question: can the network make
-a better event decision if it sees two TOBs together? The pair model applies
-the same small network to both TOBs, scores every pair in the event and uses the
-highest pair score. During training, pair losses are averaged within each eligible event
-before averaging across events.
-
-For the single-TOB study, the strongest global model accepts $69.61\%$ of
-truth-$\tau$ objects, compared with $57.37\%$ for the eFEX baseline. The
-pair study uses a different measure: the fraction of signal events that fire.
-On its final test, this efficiency rises from $34.30\%$ for the second-highest-
-$\ptTOB$ baseline to $46.70\%$, a gain of 12.40 percentage points. The achieved event fake rates are reported with the pair results in
-\cref{sec:pair_results}. The two studies use different denominators and
-their percentages should not be compared directly.
+The ATLAS Level-1 trigger must distinguish narrow tau deposits from ordinary
+jets while collisions arrive at \SI{40}{MHz}, retaining a small fraction for
+reconstruction~\cite{atlas_trigger_run3,atlas_phase1_tdr}. We study compact
+neural networks for calorimeter Trigger Objects (TOBs) supplied by the electron
+Feature Extractor (eFEX), targeting a $0.5\%$ event fake rate. Single-TOB
+models test features, architectures and objectives; the pair extension combines
+two TOBs before the event decision. Their efficiencies use different denominators:
+truth-$\tau$ objects and signal events, respectively
+(\cref{sec:input_unit,sec:pair_results,app:pair_protocol}).
 
 \noindent\textbf{Code and demo:} \url{\repourl}

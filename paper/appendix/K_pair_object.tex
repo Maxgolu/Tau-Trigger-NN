@@ -21,6 +21,76 @@ $866{,}872$ pairs. There are 589 events with fewer than two finite TOBs. These
 events remain in the efficiency and fake-rate denominators and cannot pass
 through the neural branch.
 
+\subsection{Pair inputs, loss and decision details}
+\paragraph{Pair-object models.}
+The single-object rule can accept two individually plausible TOBs without
+asking whether they form a plausible di-tau candidate. We therefore changed
+what the network sees. Within the at-most-six retained TOBs of each event, we
+keep those with finite measured $\ptTOB$ and sort them by decreasing $\ptTOB$;
+increasing \code{tob\_index} breaks exact ties. Every unordered pair $(i,j)$
+with $i<j$ is scored once. We do not add a dummy pair. An event with fewer than
+two finite TOBs therefore cannot pass through the neural branch. This keeps the
+$\ptTOB$ baseline unchanged: the largest lower $\ptTOB$ among all pairs is the
+second-highest finite $\ptTOB$ in the event.
+
+\paragraph{The same encoder is used for both TOBs.}
+The final pair model processes both TOBs with the same weights. Each TOB
+contributes an unnormalised absolute-scale $12\times12$ EM2 image and a signed
+shape channel $E/\max(\sum_{ab}|E_{ab}|,1\,\mathrm{MeV})$, together with the 45
+coarse calorimeter cells, measured $\ptTOB$ and $\Frac$. One event-level
+second-highest-$\ptTOB$ value is also given to the dense head. A
+one-convolution image branch and a 16-unit scalar branch produce a 16-value
+representation of each TOB. The two representations and the event value then
+enter a $[32,16,1]$ head. The complete model has $4{,}357$ trainable
+parameters. Sharing the encoder makes both TOBs follow the same rule, while the
+final head can learn whether their calorimeter patterns form a useful pair.
+
+\paragraph{Averaging the loss within each training event.}
+The training label is positive when both TOBs are labelled as tau candidates
+and negative when neither is. Pairs with one labelled and one unlabelled TOB
+are omitted from training; this label does not prove that the two TOBs match
+two distinct generator taus. For a positive pair, the $p=-1$ weight
+of~\eqref{eq:powerlaw} uses the smaller associated truth momentum; negative
+pairs keep unit weight. An event with many TOBs produces many more pairs. If we
+simply averaged the loss over pairs, such events would also receive more
+weight. We instead average weighted BCE within each eligible training event and
+then average those event losses equally. A batch contains all retained pairs from up to 256
+shuffled events:
+\begin{equation}
+  \mathcal{L}_{\mathrm{pair}}
+  = \frac{1}{|\mathcal{B}|}
+    \sum_{e\in\mathcal{B}}
+        \frac{1}{|\mathcal{P}^{\mathrm{train}}_e|}
+    \sum_{(i,j)\in\mathcal{P}^{\mathrm{train}}_e}
+    w_{e,ij}\,\ell_{\mathrm{BCE}}(s_{e,ij},y_{e,ij}).
+  \label{eq:pair_event_loss}
+\end{equation}
+Here $\mathcal{P}^{\mathrm{train}}_e$ contains the retained same-label
+training pairs, and $\mathcal B$ contains only events with at least one such
+pair. This removes weighting by pair multiplicity; the signal weights
+$w_{e,ij}$ still vary.
+Truth information is used only to define training labels and weights. During
+validation and testing, the model scores every pair without truth filtering.
+
+\paragraph{From pair scores to one trigger decision.}
+Let $\mathcal P_e$ contain all finite unordered pairs at inference.
+The neural event score is the maximum pair score,
+$s_e=\max_{(i,j)\in\mathcal{P}_e}s_{e,ij}$. The $\ptTOB$ branch uses
+$q_e=\max_{(i,j)\in\mathcal{P}_e}\min(\ptTOBof{e,i},\ptTOBof{e,j})$, and the
+final event decision is
+\begin{equation}
+  A_e=\1[s_e\geq t]\vee\1[q_e\geq C].
+  \label{eq:pair_decision_details}
+\end{equation}
+The two branches share one event-level background budget, so an event accepted
+by both is counted once. Checkpoints, the neural threshold and the
+$\ptTOB$-branch budget are selected on validation independently for seeds 42,
+123 and 456.
+The three trained models are reported separately and averaged only when the
+results are summarised; they are not combined into an ensemble. Exact
+construction, training and final-test details appear in
+\cref{app:pair_protocol}.
+
 \subsection{How the final model was selected}
 The pair study was organised as six questions, with one main change at each
 stage:
@@ -168,6 +238,46 @@ The checkpoint SHA-256 values are
 \code{12e193189d58...a16c3}. The repository manifest records the complete
 hashes, configuration, preprocessing files and source-file hashes.
 
+\subsection{Detailed final-test discussion}
+\paragraph{Seeing two TOBs together improves the turn-on.}
+The selected model scores every pair of finite-$\ptTOB$ TOBs and averages
+training losses within eligible events before averaging across events. Unlike the fixed-rate comparisons above,
+we did not recalibrate its thresholds on the test set. The checkpoint and both
+branch thresholds were selected on validation and then applied unchanged; the
+$\ptTOB$ baseline uses
+$q_e\geq\SI{19.4}{GeV}$. The final test contains $64{,}286$ events:
+$14{,}509$ signal and $49{,}777$ background events. Its $361{,}685$ finite
+TOBs form $866{,}872$ unordered pairs; 589 events contain fewer than two finite
+TOBs and therefore fail both branches. The selected epochs are 17, 18 and 20
+for seeds 42, 123 and 456, respectively.
+
+For this subsection only, signal efficiency is the fraction of signal events
+that fire. Elsewhere in the paper it is the fraction of truth-$\tau$ objects
+accepted, so the two percentages are not directly comparable. For the
+energy-bin results, we choose the first pair in deterministic pair order
+among the four highest-$\ptTOB$ TOBs with two positive labels and two finite
+truth momenta, and assign the event their lower truth momentum. These
+values are therefore also not directly comparable with
+\cref{tab:results_main,fig:results_main}.
+
+
+
+Across the three models, mean signal efficiency rises from $34.30\%$ to
+$46.70\%$, a mean gain of 12.40 percentage points with a standard deviation of
+0.32 points across seeds
+(\cref{tab:pair_final}). The gain is concentrated in the turn-on energy
+ranges: the mean differences are 21.43 points for $10$--$25\GeV$ and
+22.19 points for $25$--$60\GeV$, while the already saturated region above
+$60\GeV$ gains 0.78 points. This establishes the performance of the selected
+pair model; the final test alone does not show which design choice caused the
+improvement.
+
+With validation-selected thresholds held fixed, the three pair models exceeded
+the $0.5\%$ fake-rate limit ($0.5183$--$0.5223\%$, versus $0.4842\%$ for the
+baseline), so the reported gain is not at matched achieved rates.
+Exact thresholds, the final success criterion, historical-exposure
+qualification and uncertainty procedures appear in \cref{app:pair_protocol}.
+
 \subsection{Final test}
 All model and threshold choices were fixed before the final test. The test set
 was not used for retraining, checkpoint selection, threshold changes or
@@ -201,3 +311,31 @@ The public result files intentionally exclude raw detector data, event-level
 predictions and trained checkpoints. The submitted verifier checks the public
 configuration, implementation and result-file hashes, recomputes the reported
 mean and standard deviation, and runs the data-free CPU demo.
+
+\subsection{Lessons from the pair extension}
+\paragraph{Let the model see what the decision depends on.}
+The trigger asks whether an event contains two useful TOBs, whereas the
+original network judged each TOB separately. Scoring TOB pairs gives the model
+some event context without requiring a large network over the whole event. The
+final test shows that the selected pair model works better, but it does not by
+itself show whether the gain came from pairing, the encoder or another design
+choice; those questions require matched validation comparisons
+(\cref{sec:input_unit,sec:pair_results}).
+
+\paragraph{One event should count once.}
+An event with $n$ TOBs produces $n(n-1)/2$ pairs. Averaging BCE over all pairs
+would therefore give more weight to events with more TOBs, even though the fake
+rate and efficiency count every event once. We first average weighted loss within each eligible training event and then
+average those event losses equally. More pairs from one event are not more
+independent evidence (\cref{eq:pair_event_loss}).
+
+\paragraph{Keep the final test independent.}
+We fixed the thresholds, denominators and success requirements before the
+final test, and applied the selected systems unchanged. Future corrections
+require a separate calibration sample
+(\cref{sec:pair_results,app:pair_protocol}).
+
+
+The completed pair study motivates extending this direction to a variable-size
+event network, averaging training losses within events and using a new
+held-out evaluation sample.

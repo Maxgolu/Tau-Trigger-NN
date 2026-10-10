@@ -9,8 +9,8 @@ recorded in `submission/original_report_preservation.json`.
 - Preserved original scientific content in order and bound untouched methods,
   tables, figures and other source files by SHA-256. Only unfinished introduction
   and pair placeholders are replaced. Bibliography entries are preserved.
-- Kept one sentence beside the pair results explaining the achieved fake rates
-  and the unmatched-rate comparison; added the baseline fake rate to the caption.
+- Kept one sentence in Appendix K explaining the achieved fake rates and the
+  unmatched-rate comparison; added the baseline fake rate to the main table caption.
 - Distinguished retained training pairs and eligible training events from all
   inference pairs, retaining the existing signal-dependent weights.
 - Specified the first eligible top-four pair for regional evaluation and added
@@ -28,9 +28,8 @@ unchanged. No retraining or test-threshold recalibration was performed.
 The new baseline and regional aggregate fields are recomputed from the saved
 final-test decisions.
 
-This is a local revision candidate after the existing release. No existing tag
-was moved, and the revised source has not been committed or pushed. The
-full-content PDF is now 37 pages; page-limit editing is separate.
+The final PDF is 37 pages. Main text ends on page 8, references begin on page 9
+and appendices begin on page 10. Existing release tags were not moved.
 
 ## Approved historical-validation addition
 
@@ -48,14 +47,14 @@ aggregate evidence and source hashes are in `results/historical_validation/`;
 no event identities or raw data were added. The representation-screen pT
 difference is rounded from saved results to 0.078 percentage points.
 
-Coordinated ownership with “Create unified report and code”: that chat paused
-report, manifest and release writes during this addition. Its intended v2
-code link is preserved in both source copies. It retains ownership of release
-metadata, commits, tagging, pushing and remote-clone verification.
+The report source and generated artifacts were synchronized with the release
+workflow. The code link targets the `university-submission` branch in both
+source copies and the compiled PDF.
 
-The 37-page PDF compiles without undefined references or overfull boxes.
-The cover and all Appendix K pages were visually checked after the final
-build. Original-source preservation and numerical report verification pass.
+The 37-page PDF compiles without undefined references or overfull boxes. The
+cover, all eight main-text pages and affected appendix pages were visually
+checked after the final build. Original-source preservation and numerical
+report verification pass.
 
 Final checks: 296 tests passed (11 upstream deprecation warnings); report,
 submission, demo, ZIP integrity, source synchronization and whitespace checks

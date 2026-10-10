@@ -18,24 +18,6 @@ Deeper or strided EM2 branches did not systematically beat the simple E1. Local 
 \paragraph{Loss (function), but not for nothing.}
 We learned three design requirements the hard way: (i)~reward better ranking, not score inflation; (ii)~give every relevant energy region an explicit reward or protection, or it can be sacrificed; and (iii)~ensure gradients reach missed signal, not just objects already near the threshold. Exact out-of-sample checks and statistically meaningful tolerances complete the recipe. \Cref{app:loss_requirements} details all five lessons and the failures that revealed them.
 
-\paragraph{Let the model see what the decision depends on.}
-The trigger asks whether an event contains two useful TOBs, whereas the
-original network judged each TOB separately. Scoring TOB pairs gives the model
-some event context without requiring a large network over the whole event. The
-final test shows that the selected pair model works better, but it does not by
-itself show whether the gain came from pairing, the encoder or another design
-choice; those questions require matched validation comparisons
-(\cref{sec:input_unit,sec:pair_results}).
-
-\paragraph{One event should count once.}
-An event with $n$ TOBs produces $n(n-1)/2$ pairs. Averaging BCE over all pairs
-would therefore give more weight to events with more TOBs, even though the fake
-rate and efficiency count every event once. We first average weighted loss within each eligible training event and then
-average those event losses equally. More pairs from one event are not more
-independent evidence (\cref{eq:pair_event_loss}).
-
-\paragraph{Keep the final test independent.}
-We fixed the thresholds, denominators and success requirements before the
-final test, and applied the selected systems unchanged. Future corrections
-require a separate calibration sample
-(\cref{sec:pair_results,app:pair_protocol}).
+\paragraph{Pair learning follows the event decision.}
+Average losses within eligible events and keep the selected systems fixed for
+evaluation (\cref{app:pair_protocol}).

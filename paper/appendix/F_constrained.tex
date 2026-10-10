@@ -92,3 +92,27 @@ These requirements emerged from failed variants as well as successful fine-tunin
   \item \textbf{Match tolerances to statistical resolution.}
   Sparse windows cannot support arbitrarily fine protection thresholds: one accepted tau among $90$--$250$ objects changes efficiency by roughly $0.4$--$1.1$ percentage points. The first fully certified rule rejected even the initial model; pooled or multiscale guards and uncertainty-aware tolerances made selection usable. Compute uncertainty at the level of the claim, preserving event clustering and paired comparisons where appropriate. A small global gain across seeds and an equally sized fluctuation in one sparse bin are not equally strong evidence.
 \end{enumerate}
+
+\subsection{Detailed explanation from the main methodology}
+In the original MLP formulation, the regions to improve, $\Kset_J=\{[25,32),[32,40),[40,60)\}\GeV$, are kept separate from the regions to protect, $\Kset_C=\Kset_J\cup\{[60,120)\}$. The saturated region is protected but not rewarded, because there is almost no room for gain there and its measurement is dominated by noise. The CNN extension also rewards $60$--$100\GeV$ and splits the saturation guards (\cref{app:constrained}). We train on the Lagrangian of~\eqref{eq:constrained}:
+\begin{equation}
+  \mathcal{L}(\theta,\lambda)=
+  -\underbrace{\sum_{k\in\Kset_J}w_k\big[\tilde\eff_k(\theta)-\effTOB_k\big]}_{\text{reward: turn-on gain}}
+  +\lambda_{\mathrm{FPR}}\underbrace{\frac{\widetilde{\FPR}(\theta)-\FPRtarget}{\FPRtarget}}_{\text{fake-rate violation}}
+  +\sum_{k\in\Kset_C}\lambda_k\underbrace{\big(r_k-\tilde\eff_k(\theta)\big)}_{\text{deficit in region }k}.
+  \label{eq:lagrangian}
+\end{equation}
+\begin{itemize}
+  \item The \emph{reward} is the efficiency gain over the baseline in the turn-on regions. For the MLP, its fixed weights $w=(0.35,0.35,0.30)$ state our physics preference. They are not learned, because an optimiser allowed to choose them would put all the weight on the easiest region.
+  \item The \emph{fake-rate term} measures the violation relative to the $0.5\%$ target. Without this normalisation, an excess of one per mille would be numerically invisible next to an efficiency deficit of the same physical importance.
+  \item Each \emph{region term} compares the efficiency with a floor $r_k$. The floor requires a small margin over the baseline and allows at most a small loss relative to the pretrained starting model.
+  \item The multipliers $\lambda\geq0$ act as adaptive prices. The network parameters $\theta$ descend on $\mathcal{L}$ with Adam. Each price starts at zero, rises by projected dual ascent only while its constraint is \emph{measured} to be violated by the exact deployed rule, and falls back when it is satisfied~\cite{cotter2019proxy}. A fixed weight profile is the special case in which these prices are guessed in advance.
+\end{itemize}
+The hard threshold and two-object event rule have no useful gradient, so training uses smooth approximations while constraint checks use exact decisions. Four choices stabilise this separation:
+\begin{enumerate}[label=(\roman*),itemsep=1pt,topsep=2pt]
+  \item \textbf{Recalibrate the proxy threshold.} A batch-wise background quantile prevents uniformly raising all scores from appearing to improve classification.
+  \item \textbf{Anneal the temperature.} A broad early sigmoid reaches more objects; cooling from $0.10$ to $0.02$ sharpens it towards the hard decision.
+  \item \textbf{Measure violations out of sample.} Cross-fitting on a held-out $30\%$ of training events prevents optimistic in-sample estimates from suppressing the dual updates.
+  \item \textbf{Start from a trained model and respect uncertainty.} Fine-tune a BCE-based checkpoint, allow statistically meaningful tolerances and calibrate deployment conservatively.
+\end{enumerate}
+\Cref{app:constrained} gives the equations, feasibility rules and discarded variants.

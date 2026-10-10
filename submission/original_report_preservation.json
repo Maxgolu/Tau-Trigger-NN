@@ -7,10 +7,8 @@
     "appendix/C_calibration.tex": "1e8f44c909cd9631056029080613a64d148bca5326d6f3a5a7f0e0649553649c",
     "appendix/D_or_classifier.tex": "1038872d3011c1e684440ba5681da9e8f914b604f6ca8fb7f2ada2f574964b3c",
     "appendix/E_weighting.tex": "9489db401be803a356c09ba0986eb95618a5e98410d4b5ae083d3b528e94d555",
-    "appendix/F_constrained.tex": "ea1ddf129da6d8dafc24fdf5d14cd2685a9f10909bfd8109ca92959007af91e3",
     "appendix/G_architectures.tex": "28bed84f725778030ed458dae291d694984d68c2fc7a8b3b63581549382b93eb",
     "appendix/H_training.tex": "c0fd50282b15db3d4c8d84683b0f5dc518c6f61f73895ae8347f404e12d4941a",
-    "appendix/I_results.tex": "02608792e66269dc314e9063d9a2acf61f9fe91a1324653c94e5b4cac8262e2f",
     "figures/README.md": "f4f1a3f3e8a368032da4cab8306ce801155f1fea06e3972ce75a9e6351fcb0aa",
     "figures/emblem.tex": "48bf3163d8140be740d08cb0094220f49d7852db40d04f228afbf8d9da9a0c49",
     "figures/fig_app.py": "9d53664fe6eed8b3adda1e683df2d6f9ef73bb60bb3b6295a15d60b6211f2dfc",
@@ -35,7 +33,6 @@
     "figures/scripts/prep.py": "e510b305d7a429ecfbaf6a69ad0c7f0403ee00a0c9a5333c431db50c78eea88b",
     "figures/title_image.jpg": "329ee28f0a668fa0784eda8359f7af15b9978687c912efd168dfccf7f8aa691e",
     "neurips_2025.sty": "ef7a55f0a7c9da12fea39af7990a6a314a721b74a23b1544f252e55fcba940cd",
-    "sections/02_background.tex": "ec8fa92041e5f9e01f63577c193c3adbfb92b4337111a225ec2b69c2d5bcbd59",
     "sections/03_setting.tex": "521b3732ba992e7da5b8894c964d25c7da4ab5a4dbb21ed9a0a554cc9bf2a984",
     "tables/tab_capacity.tex": "d4d6b311efd9823ab9404ff11c2d5a9288c2b9c2126c1be8e13465cdecb447a3",
     "tables/tab_ft.tex": "cd7eda5b0024ff120f57e046b9beb3ba4512736a4d5aba53ef0a9fbcc6d5fe4a",
@@ -45,6 +42,55 @@
     "tables/tab_lb_top.tex": "069490502fe9ea0a912db09c9a41cf56aef8a0ef469a16d854022f68c9e2a5f8",
     "tables/tab_main.tex": "2a5e48afe309f9a92ff6aefbde439e0d08b463e12061791ef8adf4af3c785fff",
     "tables/tab_weighting_or.tex": "27203af0e4c5561fe3da245f2bd23188047a0d15f17670fbd8eb13d7c092c8a0"
+  },
+  "appended_files": {
+    "appendix/F_constrained.tex": {
+      "original_sha256": "ea1ddf129da6d8dafc24fdf5d14cd2685a9f10909bfd8109ca92959007af91e3",
+      "original_byte_length": 15931
+    },
+    "appendix/I_results.tex": {
+      "original_sha256": "02608792e66269dc314e9063d9a2acf61f9fe91a1324653c94e5b4cac8262e2f",
+      "original_byte_length": 18268
+    }
+  },
+  "approved_replacements": {
+    "sections/02_background.tex": {
+      "original_sha256": "ec8fa92041e5f9e01f63577c193c3adbfb92b4337111a225ec2b69c2d5bcbd59",
+      "replacements": [
+        {
+          "original": "\\includegraphics[width=\\linewidth]{figures/fig_calo_input.pdf}",
+          "revised": "\\includegraphics[width=0.95\\linewidth]{figures/fig_calo_input.pdf}"
+        }
+      ]
+    }
+  },
+  "preserved_block_replacements": {
+    "sections/04_methodology.tex": [
+      {
+        "original": "\\includegraphics[width=\\linewidth]{figures/fig_features.pdf}",
+        "revised": "\\includegraphics[width=0.95\\linewidth]{figures/fig_features.pdf}"
+      },
+      {
+        "original": "\\resizebox{\\linewidth}{!}{\\input{figures/fig_architecture}}",
+        "revised": "\\resizebox{0.95\\linewidth}{!}{\\input{figures/fig_architecture}}"
+      }
+    ],
+    "sections/05_results.tex": [
+      {
+        "original": "\\begin{figure}[H]",
+        "revised": "\\begin{figure}[!htbp]"
+      },
+      {
+        "original": "\\includegraphics[width=\\linewidth]{figures/fig_results_main.pdf}",
+        "revised": "\\includegraphics[width=0.97\\linewidth]{figures/fig_results_main.pdf}"
+      }
+    ],
+    "appendix/I_results.tex": [
+      {
+        "original": "\\begin{figure}[t]",
+        "revised": "\\begin{figure}[H]"
+      }
+    ]
   },
   "preserved_blocks": {
     "appendix/J_future.tex": [
@@ -123,5 +169,18 @@
     "sections/07_future.tex": [
       "\\section{Tau be continued} \\label{sec:future} Four directions follow from the remaining accuracy--resource trade-off: \\begin{itemize} \\item \\textbf{Smaller CNNs.} Reduce channels and head widths, prune, quantise and distil strong models into compact students; validate the resulting efficiency, latency and FPGA resource use. \\item \\textbf{Adaptive loss design.} Derive target regions and tolerances from the starting model's weaknesses, with uncertainty-aware updates that adapt to the input representation. \\item \\textbf{Whole-event learning.} Vary the number of input objects and design an event-level architecture that can learn dependencies between candidates, rather than scoring each in isolation. \\item \\textbf{Richer detector inputs.} The limited detector information available to our models leaves low-energy tau and background deposits difficult to distinguish. Richer measurements and finer spatial resolution at the input stage could therefore be crucial, rather than further model complexity alone. \\end{itemize} \\Cref{app:future} develops these directions and their evaluation requirements."
     ]
-  }
+  },
+  "relocations": [
+    {
+      "source": "sections/04_methodology.tex",
+      "destination": "appendix/F_constrained.tex",
+      "split_block_index": 9,
+      "split_marker": "In the original MLP formulation,"
+    },
+    {
+      "source": "sections/05_results.tex",
+      "destination": "appendix/I_results.tex",
+      "block_indices": [5]
+    }
+  ]
 }

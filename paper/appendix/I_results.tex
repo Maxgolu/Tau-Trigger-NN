@@ -113,3 +113,11 @@ Every entry of the global top ten reads the EM2 image with a convolutional branc
 
 \lbfig{budget}{Best models within a $5$K budget.}{The five highest global efficiencies among models of at most $5$K parameters.}
 Within the budget, three $2.0$K-parameter MLPs lead: the IF model and two constrained fine-tunes of the $p=-1$ model. At this size the hand-made $\Frac$ carries the EM2 information more cheaply than a convolutional branch. The EM2-only model with the 15 summaries ($4.1$K) and V2+\Ffeat\ ($2.4$K) follow, $0.3$ points behind.
+
+\subsection{Controlled-comparison figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_results_analysis.pdf}
+  \caption{(a) Remaining OR trade-off after inverse-frequency (IF) weighting: adding the comparator exchanges low-energy efficiency for plateau gains. Both sides use IF; the BCE-to-IF comparison is in \cref{tab:analysis}. (b) Effect of adding EM2 and $\Frac$, then removing the core convolution. Abbreviations: \cref{tab:naming}. Supporting comparisons: \cref{app:analysis_weighting,app:analysis_representation}.}
+  \label{fig:results_analysis}
+\end{figure}

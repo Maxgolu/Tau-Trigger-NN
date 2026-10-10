@@ -1,38 +1,36 @@
-# Main-paper page-limit edit plan
+# Main-paper page-limit edit record
 
 ## Current pagination
 
-- Max's exported PDF: Section 7 and the references begin on page 9; Appendix A
-  begins on page 11.
-- Unified PDF: Section 7 ends on page 10; references begin on page 11;
-  Appendix A begins on page 13.
-- The pair integration therefore adds approximately one main-text page. The
-  original paper itself also requires roughly one page of compression to place
-  all main sections within eight pages.
+- Final unified PDF: the main text ends on page 8, references begin on page 9
+  and Appendix A begins on page 10.
+- The full report contains 37 pages.
+- Max's architecture discussion, lessons and future-work bullets remain in the
+  main text.
 
-No page-limit edits below have been applied. They should be agreed with Max
-before changing his existing prose.
+The page-limit edits below were applied with exact preservation checks for
+relocated original material.
 
-## Recommended strategy
+## Applied strategy
 
 Preserve every result and qualification, but remove repeated technical detail
 from the main text when the same material already appears in an appendix. The
 main paper should retain the problem, method decisions, equations needed to
 understand those decisions, headline comparisons, and limitations.
 
-## Proposed reductions
+## Applied reductions
 
-| Priority | Main-text change | Appendix destination | Estimated saving |
-|---|---|---|---:|
-| 1 | Compress the four-item stabilisation discussion after the constrained-loss equation to one sentence | Appendix F already contains the full surrogate, cross-fitting, feasibility, and leakage-protection protocol | 0.45 page |
-| 2 | Shorten the V1--V4 and E1--E3 architectural walkthrough to the design distinction and retained conclusion | Appendix G already explains every block and draws them | 0.30 page |
-| 3 | Keep the pair construction, shared encoder, equal-event principle, and decision equation in Section 4.4, but move dimensions and training mechanics to Appendix K | Appendix K | 0.35 page |
-| 4 | Keep the pair final table, 12.40-point gain, and failed success criterion in Section 5.3; move population accounting, regional-coordinate definition, and uncertainty details to Appendix K | Appendix K | 0.30 page |
-| 5 | Merge the three pair-specific lesson paragraphs into one compact paragraph | Appendix K retains the technical rationale | 0.20 page |
-| 6 | Tighten the introduction contribution list without removing either author's contribution | No move required | 0.15 page |
+| Main-text change | Appendix destination |
+|---|---|
+| Retain the constrained objective and essential equation; relocate its detailed Lagrangian explanation verbatim | Appendix F |
+| Retain all five architecture paragraphs; reduce two figure widths modestly | None |
+| Keep the pair method, event decision and parameter count; move complete mechanics and equations | Appendix K |
+| Keep the final table and 12.40-point gain; move regional, uncertainty and fake-rate qualification details | Appendix K |
+| Relocate the secondary analysis figure and caption verbatim while retaining all interpretation paragraphs | Appendix I |
+| Tighten the introduction and pair-specific lessons without removing either contribution | Appendix K retains detail |
 
-The estimated total is 1.75 pages. Float repacking may provide the remaining
-space needed for Section 7 to finish by page 8.
+Float placement and modest figure scaling provide the remaining space needed
+for Section 7 and acknowledgements to finish on page 8.
 
 ## Content that must remain visible
 
@@ -48,9 +46,9 @@ space needed for Section 7 to finish by page 8.
 - the no-ensemble and frozen-threshold protocol;
 - the code and demo link.
 
-## Review sequence
+## Completed review
 
-1. Max approves the proposed movements of his existing methodology text.
-2. Apply all reductions in one revision, preserving the complete appendix text.
-3. Recompile and confirm that references begin after eight pages of main text.
-4. Review every page visually and compare all numerical claims again.
+1. Original unchanged files remain hash-bound.
+2. Relocated original blocks are checked token-for-token in Appendices F and I.
+3. The report compiles with references beginning after eight main-text pages.
+4. All affected pages were visually reviewed and numerical claims rechecked.

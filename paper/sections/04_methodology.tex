@@ -23,7 +23,7 @@ where $\mathcal{W}$ is the set of the $100$ overlapping $3\times3$ windows (\cre
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures/fig_features.pdf}
+  \includegraphics[width=0.95\linewidth]{figures/fig_features.pdf}
   \caption{Feature study (training split, normalised per class). (a) $\ptTOB$, log scale. (b) $\Frac$ for $20\leq\ptTOB<\SI{40}{GeV}$; dashed lines mark the medians. (c,d) Computation of $\Frac$ for the objects of \cref{fig:calo_input}: the red square is the best $3\times3$ window.}
   \label{fig:features}
 \end{figure}
@@ -72,28 +72,10 @@ A fixed weight profile applies the same emphasis whether or not a protection is 
   \max_\theta\sum_{k\in\Kset_J}w_k\big[\eff_k(\theta)-\effTOB_k\big]\quad\text{s.t.}\quad\FPRev(\theta)\leq\FPRtarget,\;\;\eff_k(\theta)\geq r_k\;\;(k\in\Kset_C).
   \label{eq:constrained}
 \end{equation}
-In the original MLP formulation, the regions to improve, $\Kset_J=\{[25,32),[32,40),[40,60)\}\GeV$, are kept separate from the regions to protect, $\Kset_C=\Kset_J\cup\{[60,120)\}$. The saturated region is protected but not rewarded, because there is almost no room for gain there and its measurement is dominated by noise. The CNN extension also rewards $60$--$100\GeV$ and splits the saturation guards (\cref{app:constrained}). We train on the Lagrangian of~\eqref{eq:constrained}:
-\begin{equation}
-  \mathcal{L}(\theta,\lambda)=
-  -\underbrace{\sum_{k\in\Kset_J}w_k\big[\tilde\eff_k(\theta)-\effTOB_k\big]}_{\text{reward: turn-on gain}}
-  +\lambda_{\mathrm{FPR}}\underbrace{\frac{\widetilde{\FPR}(\theta)-\FPRtarget}{\FPRtarget}}_{\text{fake-rate violation}}
-  +\sum_{k\in\Kset_C}\lambda_k\underbrace{\big(r_k-\tilde\eff_k(\theta)\big)}_{\text{deficit in region }k}.
-  \label{eq:lagrangian}
-\end{equation}
-\begin{itemize}
-  \item The \emph{reward} is the efficiency gain over the baseline in the turn-on regions. For the MLP, its fixed weights $w=(0.35,0.35,0.30)$ state our physics preference. They are not learned, because an optimiser allowed to choose them would put all the weight on the easiest region.
-  \item The \emph{fake-rate term} measures the violation relative to the $0.5\%$ target. Without this normalisation, an excess of one per mille would be numerically invisible next to an efficiency deficit of the same physical importance.
-  \item Each \emph{region term} compares the efficiency with a floor $r_k$. The floor requires a small margin over the baseline and allows at most a small loss relative to the pretrained starting model.
-  \item The multipliers $\lambda\geq0$ act as adaptive prices. The network parameters $\theta$ descend on $\mathcal{L}$ with Adam. Each price starts at zero, rises by projected dual ascent only while its constraint is \emph{measured} to be violated by the exact deployed rule, and falls back when it is satisfied~\cite{cotter2019proxy}. A fixed weight profile is the special case in which these prices are guessed in advance.
-\end{itemize}
-The hard threshold and two-object event rule have no useful gradient, so training uses smooth approximations while constraint checks use exact decisions. Four choices stabilise this separation:
-\begin{enumerate}[label=(\roman*),itemsep=1pt,topsep=2pt]
-  \item \textbf{Recalibrate the proxy threshold.} A batch-wise background quantile prevents uniformly raising all scores from appearing to improve classification.
-  \item \textbf{Anneal the temperature.} A broad early sigmoid reaches more objects; cooling from $0.10$ to $0.02$ sharpens it towards the hard decision.
-  \item \textbf{Measure violations out of sample.} Cross-fitting on a held-out $30\%$ of training events prevents optimistic in-sample estimates from suppressing the dual updates.
-  \item \textbf{Start from a trained model and respect uncertainty.} Fine-tune a BCE-based checkpoint, allow statistically meaningful tolerances and calibrate deployment conservatively.
-\end{enumerate}
-\Cref{app:constrained} gives the equations, feasibility rules and discarded variants.
+The Lagrangian rewards turn-on gains while penalising fake-rate and regional
+deficits. Training uses smooth decisions; exact out-of-sample checks,
+threshold recalibration, temperature annealing and uncertainty-aware
+fine-tuning stabilise the optimisation (\cref{app:constrained}).
 
 % ----------------------------------------------------------------------------
 \subsection{Architectures}
@@ -121,7 +103,7 @@ Every convolution is followed by BatchNorm~\cite{ioffe2015batchnorm} and LeakyRe
 
 \begin{figure}[t]
   \centering
-  \resizebox{\linewidth}{!}{\input{figures/fig_architecture}}
+  \resizebox{0.95\linewidth}{!}{\input{figures/fig_architecture}}
   \caption{Overview of the single-object pipeline. (a) How every model is assembled: optional convolutional branches on the core tensor (V1--V4) and on the EM2 image (E1--E3), concatenated with scalar inputs such as $\Frac$, feed a $[32,16]$ head. The MLP uses flat inputs only. (b) How object scores become an event decision (\cref{sec:setting,sec:input_unit}): one shared network scores every TOB; the OR classifier also accepts an object when $q_{e,i}=\ptTOB\geq C$; the event fires with at least two accepted objects.}
   \label{fig:arch}
 \end{figure}
@@ -134,70 +116,22 @@ Every convolution is followed by BatchNorm~\cite{ioffe2015batchnorm} and LeakyRe
 All models above score each TOB independently, with one shared network applied to that object's inputs. The event decision is taken afterwards by the counting rule~\eqref{eq:event_decision} or by the OR rule~\eqref{eq:or} (\cref{fig:arch}b). The decision is therefore independent of TOB order. One small circuit can be replicated for every TOB slot. Training uses object labels, while calibration and evaluation are done at event level. The price is that the network sees no event context: an event-level input is identical for all objects of an event, so it cannot rank them.
 
 \paragraph{Pair-object models.}
-The single-object rule can accept two individually plausible TOBs without
-asking whether they form a plausible di-tau candidate. We therefore changed
-what the network sees. Within the at-most-six retained TOBs of each event, we
-keep those with finite measured $\ptTOB$ and sort them by decreasing $\ptTOB$;
-increasing \code{tob\_index} breaks exact ties. Every unordered pair $(i,j)$
-with $i<j$ is scored once. We do not add a dummy pair. An event with fewer than
-two finite TOBs therefore cannot pass through the neural branch. This keeps the
-$\ptTOB$ baseline unchanged: the largest lower $\ptTOB$ among all pairs is the
-second-highest finite $\ptTOB$ in the event.
+We score every unordered pair of finite-$\ptTOB$ TOBs from the same event.
+Both members use the same encoder; the complete model has $4{,}357$ parameters.
+Its inputs are the
+fine EM2 image, coarse cells, measured $\ptTOB$, $\Frac$ and event context.
+Same-label pairs teach the model; inference scores all pairs. Training averages
+weighted BCE within each eligible event, then averages those event losses.
+This removes extra weight from pair multiplicity; signal weights still vary.
+Details and \eqref{eq:pair_event_loss} appear in \cref{app:pair_protocol}.
 
-\paragraph{The same encoder is used for both TOBs.}
-The final pair model processes both TOBs with the same weights. Each TOB
-contributes an unnormalised absolute-scale $12\times12$ EM2 image and a signed
-shape channel $E/\max(\sum_{ab}|E_{ab}|,1\,\mathrm{MeV})$, together with the 45
-coarse calorimeter cells, measured $\ptTOB$ and $\Frac$. One event-level
-second-highest-$\ptTOB$ value is also given to the dense head. A
-one-convolution image branch and a 16-unit scalar branch produce a 16-value
-representation of each TOB. The two representations and the event value then
-enter a $[32,16,1]$ head. The complete model has $4{,}357$ trainable
-parameters. Sharing the encoder makes both TOBs follow the same rule, while the
-final head can learn whether their calorimeter patterns form a useful pair.
-
-\paragraph{Averaging the loss within each training event.}
-The training label is positive when both TOBs are labelled as tau candidates
-and negative when neither is. Pairs with one labelled and one unlabelled TOB
-are omitted from training; this label does not prove that the two TOBs match
-two distinct generator taus. For a positive pair, the $p=-1$ weight
-of~\eqref{eq:powerlaw} uses the smaller associated truth momentum; negative
-pairs keep unit weight. An event with many TOBs produces many more pairs. If we
-simply averaged the loss over pairs, such events would also receive more
-weight. We instead average weighted BCE within each eligible training event and
-then average those event losses equally. A batch contains all retained pairs from up to 256
-shuffled events:
-\begin{equation}
-  \mathcal{L}_{\mathrm{pair}}
-  = \frac{1}{|\mathcal{B}|}
-    \sum_{e\in\mathcal{B}}
-        \frac{1}{|\mathcal{P}^{\mathrm{train}}_e|}
-    \sum_{(i,j)\in\mathcal{P}^{\mathrm{train}}_e}
-    w_{e,ij}\,\ell_{\mathrm{BCE}}(s_{e,ij},y_{e,ij}).
-  \label{eq:pair_event_loss}
-\end{equation}
-Here $\mathcal{P}^{\mathrm{train}}_e$ contains the retained same-label
-training pairs, and $\mathcal B$ contains only events with at least one such
-pair. This removes weighting by pair multiplicity; the signal weights
-$w_{e,ij}$ still vary.
-Truth information is used only to define training labels and weights. During
-validation and testing, the model scores every pair without truth filtering.
-
-\paragraph{From pair scores to one trigger decision.}
-Let $\mathcal P_e$ contain all finite unordered pairs at inference.
-The neural event score is the maximum pair score,
-$s_e=\max_{(i,j)\in\mathcal{P}_e}s_{e,ij}$. The $\ptTOB$ branch uses
-$q_e=\max_{(i,j)\in\mathcal{P}_e}\min(\ptTOBof{e,i},\ptTOBof{e,j})$, and the
-final event decision is
+The neural event score is $s_e=\max_{(i,j)\in\mathcal P_e}s_{e,ij}$;
+$q_e$ is the second-highest finite $\ptTOB$. The joint decision is
 \begin{equation}
   A_e=\1[s_e\geq t]\vee\1[q_e\geq C].
   \label{eq:pair_decision}
 \end{equation}
-The two branches share one event-level background budget, so an event accepted
-by both is counted once. Checkpoints, the neural threshold and the
-$\ptTOB$-branch budget are selected on validation independently for seeds 42,
-123 and 456.
-The three trained models are reported separately and averaged only when the
-results are summarised; they are not combined into an ensemble. Exact
-construction, training and final-test details appear in
-\cref{app:pair_protocol}.
+Both branches share one event-level background budget. Checkpoints and
+thresholds are selected on validation independently for each training seed;
+the models are not combined into an ensemble. Events without a pair receive
+a non-passing score and remain in the evaluation denominators.

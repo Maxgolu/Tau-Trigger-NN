@@ -14,9 +14,9 @@ Our results use the fixed-rate protocol of \cref{sec:setting}: achieved event fa
 \Cref{tab:results_main} selects the highest-global-efficiency model satisfying each row's criterion. \emph{All bands} means that the three-seed mean exceeds the baseline in every reported band, not that every seed does so. These are candidates for hardware evaluation, not validated FPGA implementations.
 
 % Keep the benchmark plot and its table together, after the Section 5 heading.
-\begin{figure}[H]
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\linewidth]{figures/fig_results_main.pdf}
+  \includegraphics[width=0.97\linewidth]{figures/fig_results_main.pdf}
   \caption{(a) Benchmark turn-ons; model numbers refer to \cref{tab:results_main}. The inset shows saturation, and the lower panel shows gains over the eFEX baseline. Shading indicates statistical uncertainty. (b) Prior-work NN and baseline fits from~\cite{kernan2026}, shown as a separate historical reference. The newly supplied band averages in \cref{tab:results_main} are not point samples of this fit (\cref{app:prior_reference}). Model-name key: \cref{tab:naming}.}
   \label{fig:results_main}
 \par\medskip
@@ -38,12 +38,7 @@ The practical trade-off is clear: all five models turn on earlier, but the highe
 % ----------------------------------------------------------------------------
 \Cref{fig:results_analysis} highlights two controlled comparisons. The supporting tables, uncertainties and broader evidence are collected in \cref{app:analysis_weighting,app:analysis_representation,app:analysis_capacity,app:analysis_loss}.
 
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/fig_results_analysis.pdf}
-  \caption{(a) Remaining OR trade-off after inverse-frequency (IF) weighting: adding the comparator exchanges low-energy efficiency for plateau gains. Both sides use IF; the BCE-to-IF comparison is in \cref{tab:analysis}. (b) Effect of adding EM2 and $\Frac$, then removing the core convolution. Abbreviations: \cref{tab:naming}. Supporting comparisons: \cref{app:analysis_weighting,app:analysis_representation}.}
-  \label{fig:results_analysis}
-\end{figure}
+
 
 \paragraph{(a) More weight on energetic taus can help.}
 The results support the hypothesis in \cref{sec:loss}: emphasising energetic rather than soft taus often helped. Compared with BCE, IF reduced the selected TOB budget (\cref{tab:analysis}). \Cref{fig:results_analysis}a shows the resulting trade-off: after IF training, OR buys a small plateau gain at a larger low-energy cost, so NN-only can win globally. This is input-dependent, not a universal preference for IF or negative $p$ (\cref{app:analysis_weighting}).
@@ -58,54 +53,26 @@ Wider MLPs and deeper CNNs gave no systematic advantage in the tested families. 
 Constrained fine-tuning redistributed efficiency towards protected or rewarded regions, usually with a small global change. The best loss depended on the inputs, and the lowest-energy band remained difficult across methods (\cref{app:analysis_loss}).
 
 % ----------------------------------------------------------------------------
+\FloatBarrier
 \subsection{Final evaluation of the pair model}
 \label{sec:pair_results}
 % ----------------------------------------------------------------------------
 \paragraph{Seeing two TOBs together improves the turn-on.}
-The selected model scores every pair of finite-$\ptTOB$ TOBs and averages
-training losses within eligible events before averaging across events. Unlike the fixed-rate comparisons above,
-we did not recalibrate its thresholds on the test set. The checkpoint and both
-branch thresholds were selected on validation and then applied unchanged; the
-$\ptTOB$ baseline uses
-$q_e\geq\SI{19.4}{GeV}$. The final test contains $64{,}286$ events:
-$14{,}509$ signal and $49{,}777$ background events. Its $361{,}685$ finite
-TOBs form $866{,}872$ unordered pairs; 589 events contain fewer than two finite
-TOBs and therefore fail both branches. The selected epochs are 17, 18 and 20
-for seeds 42, 123 and 456, respectively.
-
-For this subsection only, signal efficiency is the fraction of signal events
-that fire. Elsewhere in the paper it is the fraction of truth-$\tau$ objects
-accepted, so the two percentages are not directly comparable. For the
-energy-bin results, we choose the first pair in deterministic pair order
-among the four highest-$\ptTOB$ TOBs with two positive labels and two finite
-truth momenta, and assign the event their lower truth momentum. These
-values are therefore also not directly comparable with
-\cref{tab:results_main,fig:results_main}.
+Checkpoints and thresholds were selected on validation and then applied unchanged.
+Mean signal efficiency rises from $34.30\%$ to $46.70\%$: a gain of 12.40
+percentage points with a seed standard deviation of 0.32 (\cref{tab:pair_final}).
+Here signal efficiency is the fraction of signal events that fire; elsewhere
+it is the fraction of truth-$\tau$ objects accepted, so the percentages are not
+directly comparable. Regional gains, achieved fake rates and the final success
+criterion appear in \cref{app:pair_protocol}. The final test does not isolate
+which design choice caused the improvement.
 
 \begin{table}[H]
   \centering
-  \caption{Final pair model test efficiency and achieved event fake rate. The
-  baseline is the second-highest finite-$\ptTOB$
-  rule (baseline fake rate: $0.4842\%$). Differences are paired within the
-  same $14{,}509$ signal events.}
+  \caption{Final pair-model test efficiencies and achieved event fake rates;
+  baseline fake rate: $0.4842\%$. Paired differences use $14{,}509$ signal events.}
   \label{tab:pair_final}
   \small
   \setlength{\tabcolsep}{7pt}
   \input{tables/tab_pair_final}
 \end{table}
-
-Across the three models, mean signal efficiency rises from $34.30\%$ to
-$46.70\%$, a mean gain of 12.40 percentage points with a standard deviation of
-0.32 points across seeds
-(\cref{tab:pair_final}). The gain is concentrated in the turn-on energy
-ranges: the mean differences are 21.43 points for $10$--$25\GeV$ and
-22.19 points for $25$--$60\GeV$, while the already saturated region above
-$60\GeV$ gains 0.78 points. This establishes the performance of the selected
-pair model; the final test alone does not show which design choice caused the
-improvement.
-
-With validation-selected thresholds held fixed, the three pair models exceeded
-the $0.5\%$ fake-rate limit ($0.5183$--$0.5223\%$, versus $0.4842\%$ for the
-baseline), so the reported gain is not at matched achieved rates.
-Exact thresholds, the final success criterion, historical-exposure
-qualification and uncertainty procedures appear in \cref{app:pair_protocol}.
