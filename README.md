@@ -2,7 +2,10 @@
 
 ## Video demonstration
 
-[Watch the project demo](https://raw.githubusercontent.com/Maxgolu/Tau-Trigger-NN/university-submission/demo/demo-atlas-tau.mp4) (1 min 48 s, 1080p MP4).
+[![Watch the project demo on YouTube](https://i.ytimg.com/vi/ZXKG2rvxmxY/hqdefault.jpg)](https://youtu.be/ZXKG2rvxmxY)
+
+[Watch the project demo on YouTube](https://youtu.be/ZXKG2rvxmxY) (1 min 48 s).
+[Download the MP4](demo/demo-atlas-tau.mp4) (1080p, 7.2 MB).
 
 ## Overview
 
