@@ -98,15 +98,29 @@ def _validate_input(frame: pd.DataFrame) -> None:
         raise ValueError("signal labels must be binary 0/1")
 
 
-def build_pair_dataset(frame: pd.DataFrame, event_ids=None) -> PairDataset:
-    """Select up to four finite-pT TOBs and construct same-event pairs.
+def build_pair_dataset(
+    frame: pd.DataFrame,
+    event_ids=None,
+    *,
+    max_selected_tobs=MAX_SELECTED_TOBS,
+) -> PairDataset:
+    """Select finite-pT TOBs and construct same-event pairs.
 
     TOBs are ordered within each event by decreasing measured ``tob_pt``.
     Increasing ``tob_index`` breaks exact ties. All available unordered pairs
     are emitted once in selected-rank order. Events with fewer than two valid
     TOBs remain in the event table and receive a non-passing baseline score.
+    ``None`` selects every finite TOB; the default preserves the historical
+    top-four population.
     """
     _validate_input(frame)
+    if max_selected_tobs is not None:
+        if isinstance(max_selected_tobs, bool) or not isinstance(
+            max_selected_tobs, (int, np.integer)
+        ):
+            raise ValueError("max_selected_tobs must be an integer or None")
+        if int(max_selected_tobs) < 2:
+            raise ValueError("max_selected_tobs must be at least two")
     work = frame.loc[:, ["eventNumber", "tob_index", "tob_pt", "signal"]].copy()
     work["_pt"] = _numeric_values(work["tob_pt"], "tob_pt")
     work["_label"] = work["signal"].to_numpy(dtype=np.uint8)
@@ -131,7 +145,11 @@ def build_pair_dataset(frame: pd.DataFrame, event_ids=None) -> PairDataset:
     finite["selected_rank"] = finite.groupby(
         "eventNumber", sort=False
     ).cumcount()
-    selected = finite.loc[finite["selected_rank"] < MAX_SELECTED_TOBS].copy()
+    selected = (
+        finite.copy()
+        if max_selected_tobs is None
+        else finite.loc[finite["selected_rank"] < int(max_selected_tobs)].copy()
+    )
     selected = selected.rename(columns={"_pt": "tob_pt_value", "_label": "tob_label"})
     selected["tob_pt"] = selected["tob_pt_value"]
     selected = selected.loc[:, SELECTED_TOB_COLUMNS].reset_index(drop=True)

@@ -25,7 +25,7 @@ class PairConfigTests(unittest.TestCase):
             "member_compact_em2_pt",
         }
         paths = sorted((ROOT / "configs").glob("pair_*/*.json"))
-        self.assertEqual(len(paths), 94)
+        self.assertEqual(len(paths), 95)
         seen = {}
         for path in paths:
             config = json.loads(path.read_text(encoding="utf-8"))
@@ -58,7 +58,7 @@ class PairConfigTests(unittest.TestCase):
             if loss_name == "cross_entropy":
                 self.assertEqual(config["model"]["output_classes"], 3)
             seen.setdefault(config["experiment_name"], set()).update(declared_seeds)
-        self.assertEqual(len(seen), 36)
+        self.assertEqual(len(seen), 37)
         self.assertTrue(all(seeds == {42, 123, 456} for seeds in seen.values()))
 
 

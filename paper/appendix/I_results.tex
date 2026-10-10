@@ -1,0 +1,115 @@
+% ============================================================================
+\section{Detailed Results}
+\label{app:results}
+% ============================================================================
+
+\subsection{How the numbers are computed}
+\label{app:results_method}
+Our result tables are recomputed from stored test runs; the separately supplied prior-work reference is described in \cref{app:prior_reference}. For each seed, the model and the baseline are calibrated on the test background to the same $0.5\%$ event-level target, and the achieved rates are recorded (\cref{app:calibration}). A band efficiency pools the $2.5\GeV$ bins of that band, each weighted by its number of test $\tau$ objects, so it equals the fraction of all $\tau$ objects of the band that are accepted. The table entry is the mean over the three seeds, and $\pm$ is the standard error of that mean. A configuration enters the lists only when all three seeds exist and the configurations differ only in the seed. The efficiency at the threshold calibrated on validation is stored for every run as a separate check of generalisation.
+
+
+\subsection{Historical reference}
+\label{app:prior_reference}
+The previous researchers supplied the five band efficiencies in \cref{tab:results_main}: $12.59$, $60.07$, $86.44$, $90.90$ and $91.63\%$, with a confirmed global efficiency of $62.53\%$. These are externally supplied results rather than measurements recomputed in this study. The prior row remains separate from our fixed-protocol rankings and red baseline-deficit markings because its evaluation protocol differs.
+
+\Cref{fig:results_main}b retains the published Fermi--Dirac fits (NN midpoint $26.8741\GeV$, slope $0.1830\GeV^{-1}$ and plateau $0.9157$). Band averages are not efficiencies at bin centres; we neither reconstruct a new fine-grained curve from the five supplied means nor adjust the means to match that fit.
+
+\subsection{Benchmark trade-offs and seed-level behaviour}
+\label{app:benchmark_detail}
+All five models turn on much earlier than the baseline (\cref{fig:results_main}a). They reach $50\%$ efficiency at $26.5$--$28.1\GeV$ instead of $35\GeV$ and $90\%$ at $47$--$50\GeV$ instead of $55\GeV$. They gain $25$--$31$ points in the $25$--$40\GeV$ band and $10.1$--$12.2$ points globally. They differ in the last bins. Model~(1) is the most efficient model above the baseline everywhere, and it pays $1.6$ global points for this relative to model~(2). It is trained with plain BCE and uses the OR classifier, whose TOB branch recovers the energetic $\tau$ objects that plain BCE neglects. The criterion holds for the three-seed mean: in two seeds the validation search gave the TOB branch $1.5\times10^{-3}$ of the budget and the model saturates at $99.9\%$, while the third seed chose $0.5\times10^{-3}$ and falls below the baseline above $\SI{60}{GeV}$ ($0.1$ points at $60$--$100\GeV$ and $0.8$ at $100$--$120\GeV$). Models~(2)--(4) give up $0.5$--$1.1$ points at $100$--$120\GeV$. This band holds only about $750$ $\tau$ objects per seed, so one point corresponds to seven or eight objects. The MLP~(4) is only $1.2$ points below the best model at less than a quarter of its size. Model~(5), V3+\Ffeat\ with IF weighting and the OR, is the compact counterpart of model~(1): with $2.9$K parameters it stays above the baseline everywhere at a cost of $0.5$ global points relative to model~(1). Its validation-selected TOB budget was zero in two of the three seeds, so its plateau comes mainly from the network; the serial backbone V3 favoured the plateau over the turn-on in all three CNN sweeps. The same network without the OR also satisfies criterion~(5) ($67.39\%$), but beats the baseline at $100$--$120\GeV$ by only $0.03$ points; it is the option for a firmware without an OR. The best model of the previous work (\cref{fig:results_main}b) also turned on earlier than its baseline, but it fell below it at $\SI{39}{GeV}$ and saturated at $91.6\%$. Our benchmark saturation values are within about one point of our baseline; the prior-work comparison remains qualitative because its protocol differs.
+
+\subsection{Weighting and the value of the OR branch}
+\label{app:analysis_weighting}
+The hypothesis of \cref{sec:loss} concerns relative emphasis on energetic signal, not one universally optimal weighting formula. The initial turn-on-emphasis screen did not consistently help; the later power-law screen favoured negative $p$, and IF improved two of the three input representations in the initial matched comparisons. These observations support the proposed benefit of learning from clearer energetic showers, but do not establish that mechanism causally or imply that all models benefit. Both IF and power-law experiments are documented in \cref{app:weighting}.
+
+\Cref{tab:analysis} asks whether signal weighting reduces the need for a deterministic TOB branch. Read across each row while holding inputs fixed: compare BCE+OR with IF+OR for weighting, then IF+OR with IF NN-only for the classifier. Missing entries mean that a complete four-way comparison is not available; the SUM+F row, in particular, must not be read as a matched BCE-to-IF improvement. Parentheses expose saturation costs that global efficiency alone hides. Model-name definitions are in \cref{tab:naming}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Weighting and OR comparisons on fixed MLP inputs. Entries are global efficiency [\%], with $100$--$120\GeV$ efficiency in parentheses. OR entries additionally give mean TOB budget $\bar b^\star$ in units of $10^{-3}$. IF is inverse frequency, not $t^{-p}$ (\cref{tab:naming,app:weighting}).}
+  \label{tab:analysis}
+  \small
+  \input{tables/tab_weighting_or}
+\end{table}
+
+Trained with plain BCE, the network neglected energetic $\tau$ objects: the best NN-only models lost $2$--$3$ points to the baseline at $100$--$120\GeV$ (\cref{tab:analysis}). The OR classifier repaired the plateau, but its TOB branch took half or more of the fake-rate budget ($\bar b^\star=2.5$--$3.3\times10^{-3}$) and the global efficiency fell to $63$--$65\%$. Weighting the signal towards high energy changed the picture. With inverse-frequency weights the selected budgets fell to $0.5$--$1.2\times10^{-3}$, and the NN-only models reached $98.5$--$99.0\%$ at $100$--$120\GeV$ on their own. Removing the OR then raised the global efficiency by $1.1$--$1.4$ points. \Cref{fig:results_analysis}a shows why: after reweighting, the OR still adds up to $1.2$ points above $\SI{60}{GeV}$, but it pays for them with $2$--$4$ points below $\SI{40}{GeV}$, where most $\tau$ objects are. The same trade appeared in the CNNs: on the strongest inputs with plain BCE, the OR cost $1.1$--$2.5$ global points. The OR is still the most reliable way to exceed the baseline at $100$--$120\GeV$, which is why the model of criterion~(1) uses it; one NN-only model, V3+\Ffeat, also exceeds it, by $0.03$ points.
+
+Power-law weighting is a separate tested control, not hidden under the IF label. For CT+F with the OR, $p=-1$ gave $66.66\%$ globally and $99.73\%$ at $100$--$120\GeV$, versus $66.97\%$ and $99.69\%$ for IF. Under NN-only, the corresponding pairs were $67.81/99.33\%$ and $68.40/98.53\%$. Both high-energy-emphasising schemes were useful, but they selected different turn-on/plateau trade-offs.
+
+\subsection{Spatial representation, Fraction and compression}
+\label{app:analysis_representation}
+A convolution on the core tensor alone did not beat the flat MLP (V4: $66.68$ vs.\ $67.03$). Adding the scalar $\Frac$ raised V4 by $1.6$ points, almost entirely in the turn-on: $+3.3$ points at $10$--$25\GeV$ and $+2.8$ at $25$--$40\GeV$ (\cref{fig:results_analysis}b). A learned EM2 branch in place of $\Frac$ gained slightly more (E1+V4, $68.67$). Adding $\Frac$ back next to the branch still helped ($69.15\pm0.14$), again in the soft region ($+1.4$ and $+1.0$ points), supporting a practical benefit from supplying the ratio explicitly, rather than proving that convolutional networks cannot learn it. The core-tensor convolution itself then turned out to be dispensable. The EM2-only model, with the core cells as plain scalars, reached $68.88\pm0.19$ with $43\%$ fewer parameters than E1+V4+\Ffeat. Averaged over the four backbones, $\Frac$ added $1.35$ points, the 15 layer summaries only $0.25$, and the core-physics variables lowered the efficiency on every backbone, by about one point (by $0.2$--$0.3$ on the MLP), consistent with the energy-shortcut explanation in \cref{sec:features}.
+
+The error-set comparison provides a complementary observation: in $25$--$40\GeV$, at least one of the four core CNNs accepted $1{,}354$ taus missed by the flat MLP, while $201$ were accepted by the MLP but missed by all four CNNs. This comparison uses the union of four CNN acceptances, not a single CNN at its operating point. It supports complementary pattern sensitivity despite no global core-CNN advantage; it does not identify individual learned filters or prove universal CNN superiority. The architectural explanation for combining learned local patterns with explicit normalisation is given in \cref{app:fraction_complementarity}.
+
+\subsection{Capacity and shared errors}
+\label{app:analysis_capacity}
+\Cref{tab:capacity} asks a different question from \cref{tab:analysis}: does changing architecture or size help when CT, IF and the NN-only decision are fixed? The upper block is the controlled comparison. The lower block is contextual evidence from the earlier MLP sweep, expressed in fitted midpoint and plateau rather than our global metric; the two blocks should not be compared numerically.
+
+\begin{table}[ht]
+  \centering
+  \caption{Capacity study. Upper block: global efficiencies for our CT-only, IF-trained, NN-only models. Lower block: prior-work fitted midpoint [GeV] and plateau, averaged over seven input sets~\cite{kernan2026}. Model-name key: \cref{tab:naming}.}
+  \label{tab:capacity}
+  \small
+  \input{tables/tab_capacity}
+\end{table}
+
+The four core-tensor backbones span a factor $2.5$ in size and four different inductive biases, yet all land within $0.3$ points of each other and below the flat MLP (\cref{tab:capacity}). They also fail on the same objects: the sets of missed $\tau$ objects overlap with a Jaccard index of up to $0.89$, and $96\%$ of the commonly missed $\tau$ objects in $25$--$40\GeV$ are missed by the flat MLP as well. The earlier MLP sweep~\cite{kernan2026} shows the same from the other side: growing the network from $[32,16]$ to $[512,256,128,64,32]$ left the midpoint unchanged and lowered the fitted plateau from $0.908$ to $0.880$. Among the EM2 branches, the deeper E2 and E3 gave no systematic gain over the single-block E1 (on V4+\Ffeat: $69.15$ for E1 against $68.72$ and $68.48$). Together, these controlled comparisons suggest that input discrimination, rather than capacity, was the main limitation in the tested model families.
+
+For scale, the earlier $[512,256,128,64,32]$ dense architecture has $198{,}145$ parameters on 45 CT inputs, versus $2{,}017$ for $[32,16]$: about $98$ times as many. This is an architectural size calculation; the earlier sweep's reported fit metrics average over seven input sets, not a matched CT-only comparison against our final models.
+
+A plausible explanation for the limited return from E2/E3 is that these small, seed-centred images can be classified largely from local patterns plus their positions. E1's flattened maps and dense head already combine information across the image, so extra convolutional depth need not add useful discrimination. Further down-sampling can also discard fine spatial detail. These are explanations consistent with the ablations, not established causes: the runs do not isolate information loss, optimisation difficulty or overfitting.
+
+\subsection{Fine-tuning as an energy-profile control}
+\label{app:analysis_loss}
+\Cref{tab:ft} isolates fine-tuning rather than comparing unrelated best models: each pair has the same architecture and inputs, with its pretrained checkpoint followed by FT. The MLP starts from power-law BCE with $p=-1$; the CNN starts from plain BCE. The MLP and CNN objectives use different energy-region settings, explicitly recorded in \cref{app:constrained}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Matched before/after constrained fine-tuning (FT). Efficiencies [\%] by true-$\pT$ band [GeV]; red denotes a deficit to the baseline. Names and pretraining suffixes: \cref{tab:naming}.}
+  \label{tab:ft}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \input{tables/tab_ft}
+\end{table}
+
+The constrained fine-tune moved efficiency towards the weak end of its starting point, and usually changed global efficiency by around half a point or less (\cref{tab:ft}). The $p=-1$ MLP was strong at saturation, and the fine-tune moved $1.2$--$1.4$ points into the $10$--$40\GeV$ bands while giving up $0.3$--$0.4$ above $\SI{60}{GeV}$. The BCE-trained dual-branch CNN was strong in the soft band, and the fine-tune moved efficiency from there into saturation. Averaged over the nine E+V+\Ffeat\ pairs, its effect on the global efficiency was $-0.05$ points (from $-0.46$ to $+0.29$). The best weighting also depends on the input: on the strongest input set, plain BCE beat inverse frequency ($69.53$ vs.\ $69.15$). Finally, across the evaluated configurations no model exceeded $19.1\%$ at $10$--$25\GeV$.
+
+\subsection{Four lists, four questions}
+Each list first applies a hard filter that encodes one question, and then ranks the remaining models by global efficiency, the single number that summarises the gain over the whole spectrum. Filtering first and ranking second avoids weighting criteria that have no common unit, such as a point of saturation and a point of turn-on.
+\begin{description}[leftmargin=0pt,itemsep=2pt]
+  \item[Balanced leaders (\cref{tab:lb_balanced}).] Models with at least $98.5\%$ at $100$--$120\GeV$, excluding core-tensor convolution models of $6$K parameters or more. The question: which models are strong at both ends of the spectrum and plausibly deployable?
+  \item[Plateau experts (\cref{tab:lb_plateau}).] Models with at least $99\%$ at $100$--$120\GeV$. Saturation is the strictest requirement of the trigger, and this list shows what reaching it costs.
+  \item[Most promising (\cref{tab:lb_top}).] The ten highest global efficiencies, with no other condition. Models above $6$K parameters are marked $\dagger$: before deployment they need compression, pruning, quantisation or a smaller equivalent configuration. Several need only a targeted repair of one energy region, usually saturation.
+  \item[Within budget (\cref{tab:lb_budget}).] The five highest global efficiencies among models of at most $5$K parameters, the budget closest to the specification we received.
+\end{description}
+The five benchmark models of \cref{sec:benchmark} answer related but stricter questions and are chosen by the same filter-then-rank rule.
+
+Because every value is recomputed, the lists differ in places from those of the project report, whose saturation-band values for the CNNs were $0.2$--$0.7$ points too low. The most visible change is in the plateau list: NN-only models also reach $99\%$ at $100$--$120\GeV$, so a high plateau does not require the OR. Exceeding the baseline there did, with one marginal exception (NN-only V3+\Ffeat, $+0.03$ points). The criterion-(1) model also changes: the plain-BCE OR grid, whose saturation the report underestimated, contains the most efficient model that beats the baseline in every band. The lists are built from the $104$ three-seed configurations we re-evaluated. They cover the complete 36-cell grid of dual-branch models, every V-backbone model with or without $\Frac$, every EM2-only model, and every model that the project report ranks among its best. The runs not re-evaluated are a few early OR and weighting variants, the V-backbones with \CP\ or \SUM\ added, and the reproduction of the previous work; by their reported global efficiencies (at most $67.8\%$) and saturation values, none of them could enter any list.
+
+\newcommand{\lbfig}[3]{%
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_lb_#1.pdf}
+  \caption{#2 Model-name key: \cref{tab:naming}. Left: turn-on curves. Right: gain over the baseline in $10\GeV$ windows of the saturation region; error bars are the binomial uncertainty of the model efficiency.}
+  \label{fig:lb_#1}
+\end{figure}
+\begin{table}[H]
+  \centering
+  \caption{#3 Model-name key: \cref{tab:naming}.}
+  \label{tab:lb_#1}
+  \small\setlength{\tabcolsep}{4pt}
+  \input{tables/tab_lb_#1}
+\end{table}}
+
+\lbfig{balanced}{Balanced leaders.}{Balanced leaders: the five best global efficiencies among models with at least $98.5\%$ at $100$--$120\GeV$, excluding core-tensor convolution models of $6$K parameters or more.}
+The balanced list is led by the strided E3+V2+\Ffeat\ pair, with and without fine-tuning ($69.08$ and $69.05$); the first is the model of criterion~(3). All five balanced leaders read the EM2 image and have $5.0$--$5.7$K parameters.
+
+\lbfig{plateau}{Plateau experts.}{Plateau experts: the five best global efficiencies among models with at least $99\%$ at $100$--$120\GeV$.}
+All plateau experts pay for their saturation in the turn-on: their efficiency at $10$--$25\GeV$ is $13.7$--$15.8\%$, against $17.5$--$19\%$ for the two global leaders. All five are NN-only, four of them constrained fine-tunes; the OR model of criterion~(1) misses the list by $0.01$ points.
+
+\lbfig{top}{The ten highest global efficiencies.}{The ten highest global efficiencies, with no other condition. $^\dagger$: above $6$K parameters.}
+Every entry of the global top ten reads the EM2 image with a convolutional branch, and six of the ten exceed $6$K parameters. Before deployment they need compression, or one of the compact variants below.
+
+\lbfig{budget}{Best models within a $5$K budget.}{The five highest global efficiencies among models of at most $5$K parameters.}
+Within the budget, three $2.0$K-parameter MLPs lead: the IF model and two constrained fine-tunes of the $p=-1$ model. At this size the hand-made $\Frac$ carries the EM2 information more cheaply than a convolutional branch. The EM2-only model with the 15 summaries ($4.1$K) and V2+\Ffeat\ ($2.4$K) follow, $0.3$ points behind.

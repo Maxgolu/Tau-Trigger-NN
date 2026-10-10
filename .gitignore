@@ -6,6 +6,7 @@ __pycache__/
 
 experiments/
 analysis_outputs/
+external_artifacts/
 
 Background/*.csv
 Background/*.npz

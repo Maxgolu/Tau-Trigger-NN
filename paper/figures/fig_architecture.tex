@@ -1,0 +1,56 @@
+% Architecture and event-decision diagram (TikZ). Included from Sec. 4.3.
+\definecolor{archblue}{HTML}{2A78D6}
+\definecolor{archorange}{HTML}{EB6834}
+\definecolor{archink}{HTML}{52514E}
+\begin{tikzpicture}[
+  font=\scriptsize,
+  >={Stealth[length=1.4mm]},
+  box/.style={draw=archink, rounded corners=1.5pt, align=center, inner sep=1.8pt, line width=0.4pt, minimum height=6.5mm},
+  inp/.style={box, fill=archblue!7, text width=15mm},
+  conv/.style={box, fill=archblue!22, text width=20mm},
+  dense/.style={box, fill=archink!10},
+  acc/.style={box, fill=archorange!14, text width=23mm, minimum height=5mm},
+  obj/.style={box, fill=archblue!7, minimum width=6mm, minimum height=5mm},
+  arr/.style={->, draw=archink, line width=0.45pt},
+  lbl/.style={font=\footnotesize\bfseries},
+  note/.style={font=\tiny, text=archink, align=center}
+]
+% ---------------- (a) single-object model ----------------
+\node[lbl] at (-0.55,1.25) {(a)};
+\node[inp]  (ct)   at (0.25, 0.75) {core tensor\\$5\times3\times3$};
+\node[inp]  (em2)  at (0.25,-0.15) {EM2 image\\$12\times12$};
+\node[inp, minimum height=5mm]  (frac) at (0.25,-0.95) {$\Frac$};
+\node[conv] (ctb)  at (2.45, 0.75) {backbone V1--V4\\(layer mix / spatial)};
+\node[conv] (emb)  at (2.45,-0.15) {branch E1--E3\\(conv, pool / stride)};
+\node[circle, draw=archink, inner sep=0.5pt, line width=0.4pt] (cat) at (4.05,0.30) {$\oplus$};
+\node[dense, text width=14mm] (head) at (5.05,0.30) {dense $[32,16]$\\+ sigmoid};
+\node (s) at (6.3,0.30) {$s_{e,i}$};
+\draw[arr] (ct) -- (ctb);
+\draw[arr] (em2) -- (emb);
+\draw[arr] (ctb.east) -- (cat);
+\draw[arr] (emb.east) -- (cat);
+\draw[arr] (frac.east) -| (cat.south);
+\draw[arr] (cat) -- (head);
+\draw[arr] (head) -- (s);
+\node[note] at (2.45,1.30) {conv\,$\to$\,BatchNorm\,$\to$\,LeakyReLU};
+% ---------------- (b) event decision ----------------
+\begin{scope}[xshift=7.25cm]
+\node[lbl] at (-0.35,1.25) {(b)};
+\foreach \k/\y in {1/0.88,2/0.25,3/-0.38} {
+  \node[obj] (x\k) at (0.1,\y) {$x_{e,\k}$};
+  \node[dense, minimum height=5mm] (f\k) at (0.95,\y) {$f_\theta$};
+  \node[acc] (a\k) at (2.7,\y) {$s_{e,\k}\!\ge\! t\;\vee\;q_{e,\k}\!\ge\! C$};
+  \draw[arr] (x\k) -- (f\k);
+  \draw[arr] (f\k) -- (a\k);
+}
+\node at (0.1,-0.78) {$\vdots$};
+\node at (0.95,-0.78) {$\vdots$};
+\node at (2.7,-0.78) {$\vdots$};
+\node[note] at (0.5,-1.15) {shared weights, $\leq6$ TOBs};
+\node[box, fill=archblue!22, minimum height=6mm] (cnt) at (4.95,0.25) {$\sum_i a_{e,i}\geq2$};
+\node (Ae) at (6.2,0.25) {$A_e$};
+\foreach \k in {1,2,3} { \draw[arr] (a\k.east) -- (cnt.west); }
+\draw[arr] (cnt) -- (Ae);
+\node[note] at (4.95,-0.42) {calibrated to\\$\FPRev\leq0.5\%$};
+\end{scope}
+\end{tikzpicture}

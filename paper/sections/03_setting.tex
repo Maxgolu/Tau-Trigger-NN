@@ -1,0 +1,29 @@
+% ============================================================================
+\section{Experimental Setting}
+\label{sec:setting}
+% ============================================================================
+
+\paragraph{Data.}
+We use Monte Carlo $\tau$-signal and QCD dijet-background samples from the resimulated FEX truth/all-cell production, with detector-level inputs and generator-level truth. Per event, we retain up to the six highest-$\ptTOB$ tau Trigger Objects (TOBs) from the simulated Level-1 Electron Feature Extractor (eFEX), discarding events without TOBs. A signal-sample TOB is positive if its closest visible truth $\tau$ satisfies $\Delta R<0.15$; all other TOBs are negative. The inputs described in \cref{sec:background} are binned within a $0.3\times0.3$ $(\eta,\phi)$ window around each TOB. The retained dataset contains $72{,}404$ signal and $249{,}022$ background events, $1.81$M objects and $110{,}921$ matched $\tau$ objects. For each of three seeds, complete events are randomly split $70/10/20\%$ into training, validation and test sets; grouping by (sample, event number) prevents event leakage and identifier collisions. Sample identifiers, input construction and split statistics are given in \cref{app:data}.
+
+\paragraph{Event decision and calibration.}
+A model assigns every object $i$ of event $e$ a score $s_{e,i}=f_\theta(x_{e,i})$, computed from that object's inputs $x_{e,i}$. An object is accepted when $s_{e,i}\geq t$, and the event fires when at least two objects are accepted (\cref{fig:arch}b):
+\begin{equation}
+  A_e(t)=\1\Big[\textstyle\sum_i\1[s_{e,i}\geq t]\geq2\Big]=\1\big[s_{e,(2)}\geq t\big],
+  \label{eq:event_decision}
+\end{equation}
+where $s_{e,(2)}$ is the second-highest object score in event $e$. The \emph{event-level} fake rate $\FPRev(t)$ is the fraction of background events $\Bset$ that fire. It is not the fraction of background objects. The threshold is the lowest score value that keeps the fake rate within the budget:
+\begin{equation}
+  t^\star=\min\big\{t\in\{s_{e,(2)}\}_{e\in\Bset}:\FPRev(t)\leq\FPRtarget\big\},\qquad\FPRtarget=0.005 .
+  \label{eq:calibration}
+\end{equation}
+The search runs over the unique score values, so tied scores are never split, and deployment uses the same $\geq$ comparison. A discrete score may therefore reach only a fake rate below $0.5\%$, so we always report the \emph{achieved} rate (\cref{app:calibration}).
+
+\paragraph{Metrics and baseline.}
+Signal efficiency is the fraction of truth-$\tau$ objects accepted, reported versus true $\pT$ (the \emph{turn-on}) and globally. The baseline accepts objects with $\ptTOB\geq C$ under the same two-object event rule. For fixed-rate comparisons, both are recalibrated on the same test background at $0.5\%$; achieved rates are reported, while validation-calibrated performance is a separate transfer check. The goal is earlier turn-on without sacrificing efficiency above $\SI{25}{GeV}$. Reporting bands, baseline response and calibration distinctions are detailed in \cref{app:metric_protocol}.
+
+\paragraph{Hardware constraints.}
+An indicative FPGA budget of about $4{,}000$ 8-bit weights, together with changing input and operation constraints, motivated a range of compact candidates rather than one hardware-specific optimum. We compare roughly $2$k-parameter MLPs, $4$--$5$k EM2-only CNNs and $9$k dual-branch CNNs. Counts include BatchNorm; parameter count alone does not establish hardware feasibility (\cref{app:hardware_scope}).
+
+\paragraph{Training and selection.}
+Inputs are standardised on training data. BCE-based training uses Adam~\cite{kingma2015adam} ($10^{-3}$, batch size $256$, $20$ epochs); results average three seeds. We \emph{select for the trigger, not for BCE}: each epoch is calibrated on validation background and ranked by validation efficiency or the configured trigger objective at $\FPRtarget$. Minimum-BCE checkpoints remain references. Test data do not select features, losses, budgets, architectures or checkpoints. Sweeps, fine-tuning settings and selection details appear in \cref{app:training,app:constrained}.

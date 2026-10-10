@@ -1,0 +1,44 @@
+% ---------------------------------------------------------------------------
+% Shared notation. Change a symbol here and it changes everywhere.
+% ---------------------------------------------------------------------------
+
+% Draft notes. Set \showtodostrue -> \showtodosfalse to hide every note.
+\newif\ifshowtodos
+\showtodosfalse
+\newcommand{\todo}[1]{\ifshowtodos{\color{red!70!black}\textsf{\small[#1]}}\fi}
+
+% Physics quantities
+\newcommand{\GeV}{\,\mathrm{GeV}}
+\newcommand{\pT}{p_{\mathrm{T}}}
+\newcommand{\ptTOB}{p_{\mathrm{T}}^{\mathrm{TOB}}}
+\newcommand{\pttruth}{p_{\mathrm{T}}^{\mathrm{true}}}
+\newcommand{\tauhad}{\tau_{\mathrm{had}}}
+\newcommand{\dR}{\Delta R}
+
+% Trigger quantities
+\newcommand{\FPR}{\mathrm{FPR}}
+\newcommand{\FPRev}{\mathrm{FPR}_{\mathrm{ev}}}
+\newcommand{\FPRtarget}{\varepsilon_{\mathrm{B}}}          % target event FPR (0.005)
+\newcommand{\eff}{\epsilon}
+\newcommand{\effTOB}{\epsilon^{\mathrm{TOB}}}
+\newcommand{\Frac}{\mathrm{Frac}_{\mathrm{EM2}}}
+\newcommand{\1}{\mathbf{1}}
+\newcommand{\sigmoid}{\sigma}
+\newcommand{\E}{\mathbb{E}}
+
+% Sets
+\newcommand{\Bset}{\mathcal{B}}   % background events
+\newcommand{\Sset}{\mathcal{S}}   % truth-matched tau objects
+\newcommand{\Kset}{\mathcal{K}}
+
+% Input bundles (short names used throughout the paper)
+\newcommand{\CT}{\textsc{ct}}        % 45 raw core-tensor cells, 5x3x3
+\newcommand{\CP}{\textsc{cp}}        % core physics: BDT, pT, deta, dphi
+\newcommand{\SUM}{\textsc{sum}}      % 15 per-layer summaries
+\newcommand{\Ffeat}{\textsc{f}}      % em2_best_3x3_fraction
+\newcommand{\EMtwo}{\textsc{em2}}    % 12x12 EM2 image
+
+% Code identifiers
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\ptTOBof}[1]{p_{\mathrm{T},#1}^{\mathrm{TOB}}}
+\definecolor{cbred}{HTML}{E34948}

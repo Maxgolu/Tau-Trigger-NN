@@ -1,0 +1,70 @@
+% ============================================================================
+\section{Training and Selection Details}
+\label{app:training}
+% ============================================================================
+
+\begin{table}[ht]
+  \centering
+  \caption{Hyperparameters. Every value is a field of the experiment configuration.}
+  \label{tab:hparams}
+  \small
+  \begin{tabularx}{\linewidth}{@{}lX@{}}
+    \toprule
+    Setting & Value \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{BCE and weighted-BCE training (MLP and CNN)}} \\
+    Optimiser & Adam, learning rate $10^{-3}$ \\
+    Batch size, epochs & $256$ objects, $20$ epochs \\
+    Input preprocessing & per-column standardisation, fitted on the training split \\
+    Seeds (and event splits) & $42$, $123$, $456$ \\
+    Checkpoint & target-FPR on validation at $\FPRtarget=0.005$ (primary); minimum validation BCE (reference) \\
+    Signal weights & plain; $\alpha\in\{0,1,2,4\}$; inverse frequency ($25$--$100\GeV$, $5\GeV$ bins, clip $[0.2,5]$); power law ($t$ clamped to $[10,200]\GeV$) \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{OR classifier}} \\
+    TOB budget grid & $b\in\{0,0.0005,\dots,0.005\}$, two-fold validation cross-fitting \\
+    Objective windows & $5\GeV$ from $25$ to $100\GeV$, equal weights \\
+    Guards & per window / pooled $[60,120)$ / multiscale ($z=1$, $\delta_{\mathrm{phys}}=0.005$) \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Constrained fine-tuning}} \\
+    Initialisation & best weighted-BCE checkpoint of the same representation \\
+    Optimiser & Adam, learning rate $10^{-4}$, $20$ epochs, batches of $2048$ complete events \\
+    Training split & primal $70\%$ / constraint $30\%$ of training events (stratified) \\
+    Temperature & cosine schedule $0.10\to0.02$ \\
+    Proxy threshold & batch-rank background quantile at the event target \\
+    Dual ascent & $\eta_{\mathrm{FPR}}=1$, $\eta_k=50$, $\lambda_{\max}=25$, all $\lambda$ start at $0$ \\
+    Regions & objective $[25,32),[32,40),[40,60)$; constraints add $[60,120)$ \\
+    Margins & $m=(0.0025,0.0025,0.0025,0)$, $\rho=(0.0025,0.0025,0.0025,0.005)$ \\
+    Selection & validation cross-fitting, one-sided $95\%$ guards with $\delta_{\mathrm{phys}}=0.005$ \\
+    Deployment & confidence-safe Clopper--Pearson target ($95\%$) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\paragraph{Hyperparameter sweeps.}
+The optimiser settings were fixed by sweeping the learning rate over $\{10^{-4},10^{-3},5\cdot10^{-3}\}$ and the batch size over $\{256,1024,4096\}$. Each configuration was trained with the same three seeds and compared through an inverse Fermi--Dirac fit of the three-seed mean turn-on curve, $\eff(p)=\epsilon_{\max}/\big(1+e^{-k(p-p_{50})}\big)$, with plateau $\epsilon_{\max}$, slope $k$ and midpoint $p_{50}$. A lower midpoint means an earlier turn-on. \Cref{tab:lr_sweep} reproduces the sweep of the earlier study~\cite{kernan2026}, which used the baseline MLP on its 49-input and 193-input configurations. The combination of learning rate $10^{-3}$ and batch size $256$ gave the lowest midpoint within a spread of about one point in plateau. We repeated the same grid on our own models and reached the same choice, so all runs use these values. All runs train for $20$ epochs. Because the target-FPR checkpoint is selected after every epoch, a longer run can only add candidate checkpoints; it cannot replace a good early epoch.
+
+\begin{table}[ht]
+  \centering
+  \caption{Learning-rate and batch-size sweep (inverse Fermi--Dirac fit parameters of the three-seed mean turn-on curve; midpoint in GeV; values from~\cite{kernan2026}). The selected values are marked.}
+  \label{tab:lr_sweep}
+  \small
+  \begin{tabular}{@{}lccc@{\qquad\qquad}lccc@{}}
+    \toprule
+    Learning rate & Midpoint & Slope & Plateau & Batch size & Midpoint & Slope & Plateau \\
+    \midrule
+    $10^{-4}$             & 30.67 & 0.159 & 0.869 & $256$ (selected) & 29.33 & 0.153 & 0.863 \\
+    $10^{-3}$ (selected)  & 29.14 & 0.154 & 0.861 & $1024$           & 29.66 & 0.155 & 0.865 \\
+    $5\cdot10^{-3}$       & 29.31 & 0.151 & 0.866 & $4096$           & 30.12 & 0.157 & 0.868 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The hidden-layer sweep of the MLP is summarised in \cref{app:arch}.
+
+\paragraph{Target-FPR checkpoint selection.}
+Minimum validation BCE averages over all objects, including abundant easy examples far from the trigger boundary. A lower BCE need not improve the ordering of scores near the background tail that determines the $0.5\%$ event cut. We therefore select by validation performance at the operating point and retain the minimum-BCE checkpoint only as a reference. Depending on the experiment, the configured criterion is signal efficiency or the trigger objective with its feasibility requirements; constrained training uses the cross-fitted protocol in \cref{app:constrained}. The test set never chooses features, losses, budgets, architectures or checkpoints.
+
+At the end of every epoch the network threshold is calibrated on the validation background, so that $\widehat{\FPR}_{\mathrm{val}}\leq0.005$ with the event rule~\eqref{eq:event_decision}, or with the configured OR classifier including its budget search. The signal efficiency is then measured on the validation truth $\tau$ objects. The epoch with the highest efficiency is kept, with ties broken by achieved fake rate and then by validation BCE. The two criteria are never merged into one score. Both checkpoints are saved, and the configuration names the primary one.
+
+\paragraph{Reproducibility.}
+Seeds are reset before every model is built. Data alignment, event splits and raw features may be cached across the runs of one sweep, but normalisation statistics, models, optimiser states and all validation-derived choices are recomputed for each run. A cache hit changes neither the random state nor the results; regression tests check this equivalence. Experiments ran on the Tel Aviv University CS GPU cluster (Slurm). The code, all experiment configurations and a demo are available at \url{https://github.com/Maxgolu/Tau-Trigger-NN}.

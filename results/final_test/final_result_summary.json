@@ -1,0 +1,35 @@
+{
+  "schema_version": "public-final-result-summary-v1",
+  "status": "final_test_complete",
+  "candidate": "all_finite_equal_event",
+  "model_parameters": 4357,
+  "seeds": [42, 123, 456],
+  "test_population": {
+    "events": 64286,
+    "signal_events": 14509,
+    "background_events": 49777,
+    "finite_tobs": 361685,
+    "unordered_pairs": 866872,
+    "events_with_fewer_than_two_finite_tobs": 589
+  },
+  "inclusive_efficiency": {
+    "candidate_seed_mean": 0.4669974958072001,
+    "candidate_seed_sample_sd": 0.0032020033231709927,
+    "deterministic_baseline": 0.3429595423530223,
+    "mean_paired_improvement": 0.12403795345417785,
+    "mean_paired_improvement_percentage_points": 12.403795345417785
+  },
+  "seed_aggregation": "Arithmetic mean and sample standard deviation across three independently trained seed systems; models and events are not pooled, and there is no ensemble.",
+  "background_fpr_by_seed": {
+    "42": 0.005183116700484159,
+    "123": 0.005223295899712719,
+    "456": 0.005203206300098439
+  },
+  "selected_systems": {
+    "42": {"epoch": 17, "checkpoint_sha256": "b6f74de01e81fb1cefb3b2221e7012bb1d99a5d8315790a6292f99710a5da605", "neural_threshold": 0.20193341374397278, "pt_branch_budget": 0.0, "pt_threshold_gev": 127.50000000000001},
+    "123": {"epoch": 18, "checkpoint_sha256": "0b8147d99078b975cda6fab0ddbabacf29bb4c2880171dccfe3c9e4ae14fb02a", "neural_threshold": 0.3519463837146759, "pt_branch_budget": 0.001, "pt_threshold_gev": 33.8},
+    "456": {"epoch": 20, "checkpoint_sha256": "12e193189d585d534a466c5fc6678a3972eca671c361f112ceed5928470a16c3", "neural_threshold": 0.4000909924507141, "pt_branch_budget": 0.001, "pt_threshold_gev": 33.8}
+  },
+  "interpretation": "The final system improved inclusive efficiency by 12.40 percentage points over the deterministic baseline. The stricter predeclared conjunctive success rule did not pass because each seed's measured test background FPR was slightly above 0.5 percent and one high-energy multiplicity-adjusted test did not pass.",
+  "scope": "Compact public evidence only; raw data, caches, checkpoints, private paths, and event-level predictions are intentionally excluded."
+}

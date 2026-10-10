@@ -1,14 +1,20 @@
 # Result summaries
 
-This directory contains the compact numeric inputs used by `src/pair_plots.py`.
+This directory contains the compact numeric evidence used by the report and by
+`src/pair_plots.py`.
 Raw detector data, checkpoints and event-level predictions are intentionally
 not tracked.
 
-The bundle contains only the controlled studies completed so far. It will be
-extended as the research programme continues; it is not a comprehensive final
-result release.
+`final_test/` is the submission-facing result release for the frozen
+all-finite, equal-event candidate. It records the three selected seed systems,
+their final test efficiencies and background false-positive rates, and the
+cross-seed summary. The remaining directories preserve the controlled studies
+that motivated and tested the final design.
 
 The latest controlled evidence is summarized in:
+
+- `final_test/final_result_summary.json`: compact final test result and scope;
+- `final_test/seed_results.csv`: one auditable row per frozen seed system;
 
 - `current_configurations.csv`: current leading configurations;
 - `high_resolution_two_channel/summary.csv`: per-seed counts for the current
@@ -26,8 +32,9 @@ false-positive rate.
 
 The raw-OR, high-resolution-OR, pT-factorial and pT-context groups are
 **adaptive validation evidence**. They have not passed protected confirmation
-and must not be read as final promoted-model or blind-test results. Protected
-confirmation and the final unbiased evaluation remain planned work.
+and must not be read as final promoted-model or blind-test results. They are
+preserved as the validation history that preceded the separately frozen final
+evaluation in `final_test/`.
 
 - `current_configurations.csv` is the compact entry point for the current
   reference configurations. It distinguishes input representation, neural
@@ -50,8 +57,9 @@ confirmation and the final unbiased evaluation remain planned work.
   of three descriptive representation candidates: raw coarse cells without
   member pT, raw coarse cells with member pT, and compact EM2 measurements with
   member pT. It includes global validation efficiency and conditional
-  low/medium/high-energy differences. These results are validation-only and
-  unconfirmed; the test set remains unopened. A compact seed-42 table also
+  low/medium/high-energy differences. These rows remain validation-only; at
+  that stage the test set was unopened, before the later frozen final
+  evaluation summarized in `final_test/`. A compact seed-42 table also
   preserves the complete scalar/coarse screen: 22 exact candidates across raw
   cells, summaries, EM2 subsets, layer-removal tests and layer-group tests were
   tested; 19 were closed after screening, and the three named above were
@@ -79,8 +87,8 @@ confirmation and the final unbiased evaluation remain planned work.
   protected confirmation; it is not presented as a final selected model.
 - `plots/` contains figures regenerated directly from the CSV groups above.
 
-All efficiencies in these files are validation results. They are not final
-unbiased performance estimates. Gain-source entries are controlled mean
+Except for `final_test/`, efficiencies in these files are validation results,
+not final performance estimates. Gain-source entries are controlled mean
 differences, not proof that the corresponding information source is uniquely
 causal. The high-resolution experiment changed representation and architecture
 together and should be interpreted accordingly.

@@ -1,0 +1,41 @@
+% ============================================================================
+\section{Potential Extensions}
+\label{app:future}
+% ============================================================================
+
+\subsection{Smaller convolutional networks}
+The strongest global-efficiency models use the fine EM2 input, but their parameter counts exceed those of the compact MLPs. The first step is therefore compression rather than greater depth: reduce channel counts and dense-head widths, then test pruning, quantisation-aware training and knowledge distillation into a student of roughly $2{,}000$ parameters. The dense head contains most parameters and is a natural pruning target. Structured reductions should be evaluated alongside sparse pruning, because fewer nonzero weights do not automatically imply lower hardware cost.
+
+Each candidate should retain the event-level calibration protocol and report the full energy-efficiency profile, not just global efficiency. An FPGA-oriented toolchain such as hls4ml can then assess synthesis feasibility, supported operations, latency and resource use. Quantisation and compression may change score ordering, so calibration and efficiency must be re-evaluated after conversion. The present parameter counts are not hardware measurements, and small accuracy losses cannot be assumed in advance (\cref{app:hardware_scope}).
+
+\subsection{Adaptive, representation-aware objectives}
+The constrained objective used manually specified regions, floors and update rates. A continuation is to derive rewarded regions and allowed deficits from the measured weaknesses of the pretrained model, and scale multiplier updates according to each region's statistical resolution. Region choices must remain tied to physics priorities: automatically optimising only the easiest deficiencies would reproduce the trade-offs the constraints were intended to prevent.
+
+Loss and representation should also be studied jointly. IF helped several compact-input configurations, whereas plain BCE followed by fine-tuning gave the highest global efficiency on the richest tested inputs. A modular objective could adapt to the starting score distribution and representation while preserving the requirements in \cref{app:loss_requirements}. Any data-driven choices must use training or validation data, with a held-out evaluation after the choices are fixed.
+
+\subsection{Using the whole event}
+The pair model sees two TOBs at a time and keeps only the highest pair score. A
+whole-event model could instead learn from all TOBs together. Because the TOBs
+have no meaningful order, changing their order should not change the decision.
+Deep Sets provide one way to build this property into a network
+\cite{zaheer2017deepsets}; Set Transformers can additionally learn interactions
+between TOBs using attention \cite{lee2019settransformer}. Such models should
+accept a variable number of TOBs, with masks for absent inputs rather than
+treating padding as detector information. Varying the number of retained TOBs
+would measure the value of additional context against latency and resource
+cost.
+
+Pairwise angular separations, relative energies and correlations among shower
+shapes can then affect one joint event decision. Define whether the output is
+an event score or context-aware object scores, and match both approaches at the
+same event-level background rate. Preserve event-level splits, give each event
+equal weight during training, and report the event metric as well as compatible object-level
+efficiencies. The current sample retains at most six TOBs: testing candidates
+beyond that limit requires a new extraction, not merely changing the model's
+input size. Since the existing final test has already informed the present
+study, this comparison requires a new held-out evaluation sample.
+
+\subsection{Richer inputs for the low-energy region}
+Low-energy taus remained difficult across substantially different models, and shared errors suggest that the current representation is a limiting factor, though they do not establish a fundamental information bound (\cref{app:analysis_capacity}). Candidate additions include finer granularity in non-EM2 layers, wider calorimeter windows, timing or tracking quantities and neighbouring-object context. These are options to investigate only where detector readout and the intended trigger stage make them available.
+
+The existing $12\times12$ EM2 image resolves the same angular region as the coarse core tensor; it is not already a wider-window measurement. Separate added spatial coverage from added granularity in controlled comparisons, and assess gains within low-energy bins at the fixed event rate. Any new input must justify its acquisition, preprocessing and hardware cost as well as its predictive benefit.

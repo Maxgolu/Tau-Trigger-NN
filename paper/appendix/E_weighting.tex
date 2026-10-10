@@ -1,0 +1,49 @@
+% ============================================================================
+\section{Energy-Weighted BCE}
+\label{app:weighting}
+% ============================================================================
+For an object with label $y_i$, score $s_i$ and weight $w_i$,
+\begin{equation}
+  \mathcal{L}_{w}=-\frac1N\sum_{i=1}^{N}w_i\big[y_i\log s_i+(1-y_i)\log(1-s_i)\big].
+\end{equation}
+Background objects always keep $w_i=1$. They have no meaningful true $\tau$ momentum, and reweighting them would distort the rare background tail that sets the $0.5\%$ event fake rate. Signal weights are built from a raw profile $r(t)$ of the true momentum $t$ (in GeV) and normalised on the \emph{training} signal only:
+\begin{equation}
+  w_i=\frac{r(t_i)}{\frac{1}{N_S}\sum_{j\in\Sset_{\mathrm{train}}}r(t_j)},\qquad y_i=1 .
+\end{equation}
+The mean training signal weight is therefore one, so a profile redistributes the signal gradient across energy without changing the overall signal--background balance. A profile fitted on training data is reused unchanged on validation data. Truth momentum is used only to build weights, never as an input.
+
+\subsection{Turn-on emphasis (\texorpdfstring{$\alpha$}{alpha} profile)}
+The first hypothesis was that the TOB branch already protects the plateau, so the network should concentrate on the turn-on:
+\begin{equation}
+  r_\alpha(t)=\begin{cases}1,& t<25,\\ 1+\alpha,& 25\leq t<40,\\ 1+\alpha/2,& 40\leq t<80,\\ 1,& t\geq80,\end{cases}
+  \qquad \alpha\in\{0,1,2,4\}.
+\end{equation}
+$\alpha=0$ is exactly plain BCE and serves as a control. Every $\alpha$ is a separate training run with $\alpha$ fixed throughout.
+
+\subsection{Inverse-frequency profile}
+The range $25$--$100\GeV$ is divided into $5\GeV$ bins. With $n_k$ training-signal objects in populated bin $k\in\Kset_+$,
+\begin{equation}
+  \bar n=\frac{1}{|\Kset_+|}\sum_{k\in\Kset_+}n_k,\qquad r_k=\operatorname{clip}\Big(\frac{\bar n}{n_k},\,0.2,\,5\Big),
+\end{equation}
+and $r=1$ outside the range. Without clipping, $n_kr_k\approx\bar n$: every bin contributes the same total signal weight. The clipping keeps a nearly empty bin from producing an unstable gradient. For seed~42 the fitted weights are about $0.39$ at $25$--$30\GeV$, $0.57$ at $35$--$40$, $0.96$ at $50$--$55$, $1.36$ at $60$--$65$, $2.06$ at $75$--$80$ and $3.28$ at $95$--$100\GeV$.
+
+\subsection{Power-law profile}
+Above $\approx\SI{25}{GeV}$ the training $\tau$ spectrum is well described by $f_S(t)\approx c/t^2$. The unweighted signal contribution of a narrow interval $[t_0,t_0+dt]$ to BCE is then
+\begin{equation}
+  d\mathcal{L}_S(t_0)\propto\frac{1}{t_0^2}\,\E\big[\ell_{\mathrm{BCE}}\mid t_0\big]\,dt .
+\end{equation}
+A $25$--$30\GeV$ bin contains about eight times as many training taus as a $95$--$100\GeV$ bin. Even when the average loss per object is similar at all energies, soft $\tau$ objects dominate the gradient because there are many more of them. Plain BCE therefore already favours the dense, low-energy part of the spectrum. For a one-parameter control over this effect, we clamp $\tilde t_i=\min(200,\max(10,t_i))$ and set $r_p(t_i)=\tilde t_i^{-p}$. Away from the clamp,
+\begin{equation}
+  f_S(t)\,w_p(t)\propto t^{-(2+p)} .
+\end{equation}
+\begin{itemize}
+  \item $p=0$: plain BCE.
+  \item $p>0$: relatively more weight on low-$\pT$ $\tau$ objects.
+  \item $p<0$: relatively more weight on high-$\pT$ $\tau$ objects.
+  \item $p=-1$: equal weighted signal counts per logarithmic interval, since $t^{-1}dt=d\log t$.
+  \item Inverse frequency: for equal-width bins and $f_S\propto t^{-2}$, it behaves roughly like a clipped $t^{2}$ weight, i.e. qualitatively $p\approx-2$.
+\end{itemize}
+IF is not the power-law profile at $p=-1$ (or exactly at $p=-2$): it uses empirical counts, different clipping and unit raw weights outside $25$--$100\GeV$. The clamp keeps very small or very large momenta from producing extreme weights. The screen covered $p\in\{-1.9,-1.6,-1.3,-1,-0.6,-0.3,0.3,0.6,1\}$, together with plain BCE and inverse frequency. The negative side was extended after the first screen favoured more weight on high-energy $\tau$ objects.
+
+\subsection{Why emphasising energetic taus can help soft ones}
+We propose a mechanism, not a proof. Energetic $\tau$ showers have a higher signal-to-noise ratio, more stable shape measurements and less overlap with background, so they are cleaner examples of the class. A representation learned from them can transfer to weaker, low-energy showers. Strongly up-weighting soft objects instead emphasises noisy or intrinsically ambiguous examples, raises the gradient variance and moves the decision boundary without teaching a more general $\tau$ signature. The mechanism is consistent with the smaller TOB budgets selected under inverse-frequency weighting (\cref{app:or}). No weight profile is optimal in general: the best profile depends on the features, the model capacity, the optimisation and the class overlap.

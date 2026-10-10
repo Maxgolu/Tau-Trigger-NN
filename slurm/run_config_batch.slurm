@@ -18,7 +18,7 @@ set -euo pipefail
 : "${CONFIG_BATCH:?Set CONFIG_BATCH to a directory name under configs/}"
 EXPERIMENT_BATCH="${EXPERIMENT_BATCH:-$CONFIG_BATCH}"
 PROJECT_ROOT="${PROJECT_ROOT:-$SLURM_SUBMIT_DIR}"
-PYTHON_BIN="${PYTHON_BIN:-/home/yandex/DLWorkShop2025b/maximg/envs/tau-trigger/bin/python}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 cd "$PROJECT_ROOT"
 

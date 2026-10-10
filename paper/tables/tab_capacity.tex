@@ -1,0 +1,16 @@
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  Model (ours, \CT) & Params & Global \\
+  \midrule
+  MLP $[32,16]$ & 2.0K & $67.03\pm0.36$ \\
+  V1 & 4.1K & $66.70\pm0.28$ \\
+  V2 & 2.4K & $66.44\pm0.21$ \\
+  V3 & 2.8K & $66.49\pm0.38$ \\
+  V4 & 5.9K & $66.68\pm0.22$ \\
+  \midrule
+  MLP sweep~\cite{kernan2026} & Midpoint & Plateau \\
+  \midrule
+  $[32,16]$ & $28.0$ & $0.908$ \\
+  $[512,256,128,64,32]$ & $28.0$ & $0.880$ \\
+  \bottomrule
+\end{tabular}

@@ -1,0 +1,115 @@
+% ============================================================================
+\section{Pair Model Details and Reproducibility}
+\label{app:pair_protocol}
+% ============================================================================
+
+\subsection{Constructing the TOB pairs}
+For each event, we keep the TOBs with finite measured $\ptTOB$. We sort them by
+decreasing $\ptTOB$, using the original TOB index to break exact ties, and form
+every unordered pair. An event with $n_e$ retained TOBs therefore produces
+$\binom{n_e}{2}$ pairs in a fixed order.
+
+During training, a pair is positive when both TOBs are labelled as tau
+candidates and negative when neither is. Pairs with one labelled and one
+unlabelled TOB are not used for training. Two positive labels do not prove that
+the TOBs match two different generator taus. During validation and testing,
+every pair is scored because truth labels are not available to the trigger. No
+truth quantity is a network input.
+
+The final test contains $64{,}286$ events, $361{,}685$ finite TOBs and
+$866{,}872$ pairs. There are 589 events with fewer than two finite TOBs. These
+events remain in the efficiency and fake-rate denominators and cannot pass
+through the neural branch.
+
+\subsection{How the final model was selected}
+The pair study was organised as six questions, with one main change at each
+stage:
+\begin{enumerate}[label=(\roman*),itemsep=1pt,topsep=2pt]
+  \item \textbf{Does the pair pipeline work?} A model using only the two
+  measured $\ptTOB$ values checked pair identities, training-only
+  normalisation, event reconstruction, threshold calibration and
+  reproducibility across three seeds. It did not beat the $\ptTOB$ baseline
+  (\path{configs/pair_pt_control/}, \path{results/pt_control/}).
+  \item \textbf{Which detector inputs help?} With the model held fixed, we
+  compared raw cells, layer summaries and compact shower features. Repeating
+  the study across three seeds showed that calorimeter information beyond the
+  two measured momenta improved validation efficiency
+  (\path{results/representation_study/},
+  \path{results/representation_reproduction/}).
+  \item \textbf{Does the fine EM2 image help?} We added one shared encoder for
+  the two full-granularity EM2 images, followed by the absolute and signed
+  two-channel form used by the final model (\path{results/high_resolution/},
+  \path{results/high_resolution_two_channel/}).
+  \item \textbf{How should the model protect high-energy events?} Controlled
+  comparisons motivated the $p=-1$ signal weighting and the direct $\ptTOB$
+  branch (\path{results/pair_or/}, \path{results/high_resolution_pt_or/},
+  \path{results/pt_factorial/}, \path{results/high_energy_recovery/}).
+  \item \textbf{Could a simpler explanation account for the gain?} We tested
+  alternative context variables, removed selected inputs, simplified the
+  representation and compared shared encoders. Variants that did not improve
+  the retained model were not promoted (\path{results/pt_context/},
+  \path{results/source_ablation/}, \path{results/clean_representation/},
+  \path{results/shared_encoder/}).
+  \item \textbf{Which pairs and events should determine the loss?} The final
+  validation study replaced the four-leading-TOB limit with all finite pairs
+  and gave every event equal weight, regardless of its number of pairs. This
+  fixed the final configuration in
+  \path{configs/pair_final_all_finite_equal_event/} before the test in
+  \path{results/final_test/}.
+\end{enumerate}
+All intermediate percentages come from validation. Only
+\path{results/final_test/} contains the final test result. The detailed
+presentation, \path{presentation/pair_model_research_history.pptx}, preserves
+the full experiment sequence and its references.
+
+\subsection{Training and model selection}
+The model is trained for 20 epochs with Adam, learning rate $10^{-3}$,
+$\beta=(0.9,0.999)$, $\epsilon=10^{-8}$, no weight decay and no AMSGrad. Seeds
+42, 123 and 456 use loader seed $424200+\mathrm{seed}$. Each update contains all
+pairs from at most 256 shuffled events and uses the loss in
+\eqref{eq:pair_event_loss}. We save one checkpoint per epoch. Validation data
+select one epoch and one OR threshold pair for each seed. Normalisation values
+inherited from the parent model are checked by hash and are never silently
+refitted.
+
+\begin{table}[h]
+  \centering
+  \caption{Validation-selected checkpoints and decision thresholds. The direct
+  $\ptTOB$ branch is effectively disabled for seed 42 by its selected budget.}
+  \label{tab:pair_thresholds}
+  \small
+  \begin{tabular}{@{}rrrrr@{}}
+    \toprule
+    Seed & Epoch & Neural threshold & TOB budget & $C$ [GeV] \\
+    \midrule
+    42  & 17 & 0.201933 & 0.000 & 127.5 \\
+    123 & 18 & 0.351946 & 0.001 & 33.8 \\
+    456 & 20 & 0.400091 & 0.001 & 33.8 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The checkpoint SHA-256 values are
+\code{b6f74de01e81...a5da605},
+\code{0b8147d99078...4fb02a} and
+\code{12e193189d58...a16c3}. The repository manifest records the complete
+hashes, configuration, preprocessing files and source-file hashes.
+
+\subsection{Final test}
+All model and threshold choices were fixed before the final test. The test set
+was not used for retraining, checkpoint selection, threshold changes or
+recalibration. Signal efficiency uses all $14{,}509$ signal events, including
+events without a pair; event fake rate uses all $49{,}777$ background events.
+
+Uncertainty is computed from paired event decisions. For each seed, the
+two-sided $95\%$ interval is obtained from the exact Clopper--Pearson
+interval~\cite{clopper1934} for $b/(b+c)$ and transformed to the paired
+difference $(b-c)/N$. The one-sided exact McNemar $p$-values for the
+high-energy region are Holm-adjusted across the three seeds. We report the
+arithmetic mean and sample standard deviation across seeds. Events are not
+pooled across seeds, and the three models are not combined into an ensemble.
+
+The public result files intentionally exclude raw detector data, event-level
+predictions and trained checkpoints. The submitted verifier checks the public
+configuration, implementation and result-file hashes, recomputes the reported
+mean and standard deviation, and runs the data-free CPU demo.

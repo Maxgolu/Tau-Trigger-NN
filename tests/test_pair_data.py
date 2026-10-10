@@ -56,6 +56,23 @@ class PairConstructionTests(unittest.TestCase):
         self.assertEqual(result.events.loc[0, "selected_tob_count"], 4)
         self.assertEqual(result.events.loc[0, "pair_count"], 6)
 
+    def test_all_finite_mode_constructs_every_unordered_pair(self):
+        frame = pd.DataFrame(
+            {
+                "eventNumber": [1] * 6,
+                "tob_index": [0, 1, 2, 3, 4, 5],
+                "tob_pt": [10.0, 60.0, 20.0, 50.0, 30.0, 40.0],
+                "signal": [0, 1, 0, 1, 0, 1],
+            }
+        )
+
+        result = build_pair_dataset(frame, max_selected_tobs=None)
+
+        self.assertEqual(result.selected_tobs["tob_index"].tolist(), [1, 3, 5, 4, 2, 0])
+        self.assertEqual(result.events.loc[0, "selected_tob_count"], 6)
+        self.assertEqual(result.events.loc[0, "pair_count"], 15)
+        self.assertEqual(set(result.pairs["three_class_label"]), {0, 1, 2})
+
     def test_exact_ties_use_increasing_tob_index(self):
         frame = pd.DataFrame(
             {

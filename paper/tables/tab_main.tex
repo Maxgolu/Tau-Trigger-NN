@@ -1,0 +1,14 @@
+\begin{tabular}{@{}llrrrrrrr@{}}
+\toprule
+Criterion & Model & 10--25 & 25--40 & 40--60 & 60--100 & 100--120 & Global & Params \\
+\midrule
+(1) all bands & E2+V4+\Ffeat, BCE, OR & 14.65 & 62.38 & 88.99 & 97.17 & 99.44 & 67.97$\pm$0.55 & 9.0K \\
+(2) global & E1+V4+\Ffeat, BCE+FT & 17.45 & 66.39 & 90.54 & \textcolor{cbred}{96.75} & \textcolor{cbred}{98.28} & 69.61$\pm$0.29 & 9.2K \\
+(3) global, $<$6K & E3+V2+\Ffeat, FT & 16.93 & 64.31 & 90.08 & 97.56 & \textcolor{cbred}{98.89} & 69.08$\pm$0.35 & 5.4K \\
+(4) global, $<$3K & MLP, \CT+\Ffeat, IF & 16.61 & 62.93 & 89.00 & 97.17 & \textcolor{cbred}{98.53} & 68.40$\pm$0.21 & 2.0K \\
+(5) all bands, $<$3K & V3+\Ffeat, IF, OR & 14.13 & 60.42 & 89.14 & 97.89 & 99.50 & 67.47$\pm$0.22 & 2.9K \\
+\midrule
+--- & Prior best NN, \CP+\CT~\cite{kernan2026} & 12.59 & 60.07 & 86.44 & 90.90 & 91.63 & 62.53 & 2.1K \\
+--- & eFEX baseline & 2.28 & 35.85 & 81.60 & 96.89 & 99.34 & 57.37 & --- \\
+\bottomrule
+\end{tabular}

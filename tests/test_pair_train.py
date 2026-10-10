@@ -8,7 +8,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pair_train import (
+    equal_event_batches,
+    equal_event_loss,
     fit_zscore,
+    initialize_model_for_training,
     prepare_training_arrays,
     train_seed,
     training_weights,
@@ -16,6 +19,64 @@ from pair_train import (
 
 
 class PairTrainingTests(unittest.TestCase):
+    def test_declared_seeded_initialization_is_independent_of_prior_rng_use(self):
+        import torch
+
+        from pair_models import build_pair_model
+
+        model_config = {
+            "name": "shared_member_high_resolution_em2",
+            "image_channels": 2,
+            "image_depth": 1,
+            "member_scalar_width": 47,
+            "context_width": 1,
+            "member_embedding_width": 16,
+            "pair_head": [33, 32, 16, 1],
+            "initialization": "seeded_kaiming_uniform_leaky_relu_0.1",
+            "trainable_parameters": 4357,
+        }
+        first = build_pair_model(model_config)
+        initialize_model_for_training(first, model_config, 42)
+        torch.rand(1000)
+        second = build_pair_model(model_config)
+        initialize_model_for_training(second, model_config, 42)
+
+        for first_value, second_value in zip(
+            first.state_dict().values(), second.state_dict().values()
+        ):
+            self.assertTrue(torch.equal(first_value, second_value))
+
+    def test_equal_event_loss_averages_events_before_the_batch(self):
+        import torch
+
+        loss = equal_event_loss(
+            torch.tensor([1.0, 3.0, 10.0]),
+            torch.tensor([100, 100, 200]),
+        )
+        self.assertEqual(float(loss), 6.0)
+
+    def test_equal_event_batches_never_split_an_event(self):
+        import torch
+
+        event_ids = np.array([10, 10, 20, 30, 30, 30, 40])
+        batches = list(
+            equal_event_batches(
+                event_ids,
+                torch.Generator().manual_seed(42),
+                event_batch_size=2,
+            )
+        )
+        self.assertEqual(sorted(np.concatenate(batches).tolist()), list(range(7)))
+        for event_id in np.unique(event_ids):
+            containing = [batch for batch in batches if np.isin(event_id, event_ids[batch])]
+            self.assertEqual(len(containing), 1)
+            self.assertTrue(
+                np.isin(
+                    np.flatnonzero(event_ids == event_id),
+                    containing[0],
+                ).all()
+            )
+
     def test_zscore_uses_population_standard_deviation(self):
         values = np.array([[1.0, 10.0], [3.0, 14.0]])
         mean, scale = fit_zscore(values)
@@ -57,6 +118,39 @@ class PairTrainingTests(unittest.TestCase):
             np.testing.assert_allclose(arrays[0][:, 1], 1.0)
             np.testing.assert_allclose(arrays[1][:, 0], -1.0)
             np.testing.assert_allclose(arrays[1][:, 1], 1.0)
+
+    def test_frozen_normalizer_is_applied_without_refitting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairs.npz"
+            images = np.full((2, 2, 2, 12, 12), 5.0, dtype=np.float32)
+            scalars = np.full((2, 2, 47), 7.0, dtype=np.float32)
+            context = np.full((2, 1), 11.0, dtype=np.float32)
+            np.savez(
+                path,
+                images=images,
+                scalars=scalars,
+                context=context,
+                labels=np.array([0, 1]),
+            )
+            frozen = {
+                "images_mean": np.full((2, 12, 12), 1.0),
+                "images_scale": np.full((2, 12, 12), 2.0),
+                "scalars_mean": np.full(47, 1.0),
+                "scalars_scale": np.full(47, 3.0),
+                "context_mean": np.array([1.0]),
+                "context_scale": np.array([5.0]),
+            }
+
+            arrays, _, normalizer = prepare_training_arrays(
+                path,
+                high_resolution_widths=(47, 1, 2),
+                frozen_normalizer=frozen,
+            )
+
+            np.testing.assert_allclose(arrays[0], 2.0)
+            np.testing.assert_allclose(arrays[1], 2.0)
+            np.testing.assert_allclose(arrays[2], 2.0)
+            np.testing.assert_array_equal(normalizer["images_mean"], frozen["images_mean"])
 
     def test_generic_shared_member_inputs_use_one_pooled_normalizer(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -247,6 +341,35 @@ class PairTrainingTests(unittest.TestCase):
             self.assertTrue((run_dir / "checkpoint_epoch_02.pt").is_file())
             self.assertEqual(len((run_dir / "training_metrics.csv").read_text().splitlines()), 3)
             self.assertEqual(json.loads((run_dir / "config.json").read_text()), config)
+
+    def test_equal_event_training_run_uses_complete_event_batches(self):
+        config = {
+            "experiment_name": "equal_event_smoke",
+            "model": {"name": "pair_pt_mlp", "layers": [2, 8, 1]},
+            "optimizer": {"learning_rate": 0.001},
+            "loss": {"name": "bce", "reduction": "equal_event"},
+            "event_batch_size": 2,
+            "epochs": 1,
+        }
+        rng = np.random.default_rng(43)
+        inputs = rng.normal(size=(12, 2))
+        labels = (inputs[:, 0] + inputs[:, 1] > 0).astype(np.float32)
+        event_ids = np.repeat([10, 20, 30, 40], [2, 4, 3, 3])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pair_data = root / "pairs.npz"
+            np.savez(
+                pair_data,
+                inputs=inputs,
+                labels=labels,
+                pair_event_ids=event_ids,
+            )
+
+            run_dir = train_seed(config, pair_data, root / "runs", 42)
+            metrics = (run_dir / "training_metrics.csv").read_text()
+
+            self.assertIn("equal_event", metrics)
+            self.assertTrue((run_dir / "checkpoint_epoch_01.pt").is_file())
 
 
 if __name__ == "__main__":

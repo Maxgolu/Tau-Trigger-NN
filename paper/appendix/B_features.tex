@@ -1,0 +1,41 @@
+% ============================================================================
+\section{Feature Definitions}
+\label{app:features}
+% ============================================================================
+Let $e$ be an event and $i$ an object in it. For layer $\ell\in\{\mathrm{EM0},\mathrm{EM1},\mathrm{EM2},\mathrm{EM3},\mathrm{HAD}\}$, $E_{\ell,ab}$ is the energy of tower $(a,b)$ of its $3\times3$ window. $E^{12}_{ab}$, $a,b\in\{0,\dots,11\}$, is the EM2 image. When a ratio has an exactly zero denominator, the implementation returns zero. Every entry below is a key of the feature registry and is selected through the experiment configuration.
+
+\subsection{Input bundles}
+\begin{itemize}
+  \item \code{core\_tensors} (\CT): $x_i=\operatorname{vec}(E_{\mathrm{EM0}},E_{\mathrm{EM1}},E_{\mathrm{EM2}},E_{\mathrm{EM3}},E_{\mathrm{HAD}})\in\mathbb{R}^{45}$. Cell $9L+3r+c$ is layer $L$, row $r$, column $c$.
+  \item \code{core\_physics} (\CP): $x_i=[\mathrm{BDT}_i,\ \ptTOBof{i},\ \eta_i-\eta_{\mathrm{lead}},\ \operatorname{wrap}(\phi_i-\phi_{\mathrm{lead}})]$, where ``lead'' is the highest-$\ptTOB$ object of the event and $\operatorname{wrap}$ maps an angle to $[-\pi,\pi)$.
+  \item \code{em2\_all\_cells} (\EMtwo): $\operatorname{vec}(E^{12})\in\mathbb{R}^{144}$, reshaped to $1\times12\times12$ by the convolutional models.
+  \item \code{tob\_pt\_only}: $x_i=\ptTOBof{i}$.
+\end{itemize}
+
+\subsection{Per-layer summaries}
+\label{app:layer_summaries}
+For every layer, with $S_\ell=\sum_{a,b}E_{\ell,ab}$ and $M_\ell=\max_{a,b}E_{\ell,ab}$,
+\begin{equation}
+  D_\ell = M_\ell-(S_\ell-M_\ell)=2M_\ell-S_\ell,\qquad
+  Q_\ell=\sum_{a,b}\1\big[E_{\ell,ab}>0.1\,M_\ell\big].
+\end{equation}
+$S_\ell$ is the energy sum, $D_\ell$ the core dominance (the maximum cell minus its neighbours) and $Q_\ell$ the dynamic sparsity (the number of active cells). The 15 values $\{S_\ell,D_\ell,Q_\ell\}_\ell$ form the \SUM\ bundle. These definitions avoid cell-by-cell division, which was not available in the firmware specification of~\cite{kernan2026}.
+
+\subsection{Full-granularity EM2 features}
+\label{app:em2_features}
+With $S^{12}=\sum_{a,b}E^{12}_{ab}$, $(a^\star,b^\star)=\arg\max_{a,b}E^{12}_{ab}$ and $d^2_{ab}=(a-a^\star)^2+(b-b^\star)^2$:
+\begin{align}
+  \Frac &= \frac{\max_{w\in\mathcal{W}_{3\times3}}\sum_{(a,b)\in w}E^{12}_{ab}}{S^{12}},
+  &
+  W_{\mathrm{norm}} &= \frac{\sum_{a,b}E^{12}_{ab}\,d^2_{ab}}{S^{12}},
+\end{align}
+the compactness (\code{em2\_best\_3x3\_fraction}) and the normalised shower width (\code{em2\_normalized\_width}). Further entries include the largest and second-largest cells, the squared distance between them (\code{em2\_maxdist}), the energy outside the best window divided by $\ptTOB$, and the energies and centre distances of the three strongest non-overlapping $3\times3$ windows. The registry also contains versions computed on the $3\times3$ EM2 core, and approximations that use subtraction instead of division. \code{em2\_3x3\_maxdist} is highly discrete. An early result that ranked it first is excluded: the earlier evaluation suffered from discrete-threshold defects, so that result was not a valid $0.5\%$ comparison. All results in this paper use the tie-aware calibration of \cref{app:calibration}.
+
+\subsection{Event-level and object-geometry features}
+With $r_1(e),r_2(e)$ the two leading objects:
+\begin{equation}
+  H_T^{\mathrm{TOB}}=\sum_{i\in e}\ptTOBof{i},\qquad
+  \ptTOBof{r_2(e)},\qquad
+  \Delta R_{12}=\sqrt{(\eta_{r_1}-\eta_{r_2})^2+\operatorname{wrap}(\phi_{r_1}-\phi_{r_2})^2} .
+\end{equation}
+These are computed once per event and copied to every object. For object-specific geometry, the partner $p(i)$ of object $i$ is the leading object other than $i$. The feature \code{object\_reference\_tob\_dr2} is $(\eta_i-\eta_{p(i)})^2+\operatorname{wrap}(\phi_i-\phi_{p(i)})^2$. The feature \code{object\_partner\_context} is $[\log(1+\ptTOBof{i}),\log(1+\ptTOBof{p(i)}),\pi-|\Delta\phi_{i,p}|,|\Delta\eta_{i,p}|]$, which keeps the partner energy, the azimuthal acoplanarity and the $\eta$ separation separate. In the distribution study, events with two or more $\tau$ objects have a much harder second-highest $\ptTOB$ and a larger $H_T^{\mathrm{TOB}}$ than events without a $\tau$. Their squared separation $\Delta R^2_{12}$ also peaks near $\pi^2$, the back-to-back topology. Background events populate the same region too, however. In our single-object tests, the event sum and the object-geometry features did not improve efficiency at $\FPRtarget$ over object-level inputs.

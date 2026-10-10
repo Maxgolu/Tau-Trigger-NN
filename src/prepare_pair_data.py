@@ -355,6 +355,8 @@ def prepare_pair_split(
     include_coarse_cells=True,
     include_fraction=True,
     include_member_min_truth_pt_gev=False,
+    pair_population="top_four",
+    training_pair_filter="none",
     split_seed=42,
     max_events_per_class=None,
 ):
@@ -365,6 +367,10 @@ def prepare_pair_split(
         raise ValueError(
             "member_min_truth_pt_gev is a training-only analysis field"
         )
+    if pair_population not in {"top_four", "all_finite"}:
+        raise ValueError("pair_population must be top_four or all_finite")
+    if training_pair_filter not in {"none", "same_label_only"}:
+        raise ValueError("training_pair_filter must be none or same_label_only")
     cache = TrainingDataCache(enabled=True)
     dataset = cache.get_dataset(data_dir, max_events_per_class, split_seed)
     inventory = _source_event_inventory(
@@ -377,7 +383,11 @@ def prepare_pair_split(
     frame = dataset.frame.loc[
         dataset.frame["eventNumber"].isin(split_event_ids)
     ].copy().reset_index(drop=True)
-    pairs = build_pair_dataset(frame, event_ids=split_inventory["eventNumber"])
+    pairs = build_pair_dataset(
+        frame,
+        event_ids=split_inventory["eventNumber"],
+        max_selected_tobs=None if pair_population == "all_finite" else 4,
+    )
 
     samples = split_inventory.set_index("eventNumber")["sample"]
     positive_counts = (
@@ -403,6 +413,10 @@ def prepare_pair_split(
         pair_frame = pair_frame.loc[
             pair_frame["eventNumber"].isin(eligible_events)
         ].reset_index(drop=True)
+        if training_pair_filter == "same_label_only":
+            pair_frame = pair_frame.loc[
+                pair_frame["three_class_label"].ne(1)
+            ].reset_index(drop=True)
 
     extra_columns = ("truth_pt",) if include_member_min_truth_pt_gev else ()
     left = _member_frame(pair_frame, frame, "a", extra_columns=extra_columns)
@@ -614,6 +628,8 @@ def main():
     image_channels = ("absolute",)
     include_coarse_cells = True
     include_fraction = True
+    pair_population = "top_four"
+    training_pair_filter = "none"
     representation = args.representation
     if args.config:
         config = json.loads(Path(args.config).read_text(encoding="utf-8"))
@@ -631,6 +647,8 @@ def main():
         image_channels = tuple(config.get("image_channels", ["absolute"]))
         include_coarse_cells = bool(config.get("include_coarse_cells", True))
         include_fraction = bool(config.get("include_fraction", True))
+        pair_population = config.get("pair_population", "top_four")
+        training_pair_filter = config.get("training_pair_filter", "none")
     arrays = prepare_pair_split(
         args.data_dir,
         split=args.split,
@@ -643,6 +661,8 @@ def main():
         include_coarse_cells=include_coarse_cells,
         include_fraction=include_fraction,
         include_member_min_truth_pt_gev=include_truth,
+        pair_population=pair_population,
+        training_pair_filter=training_pair_filter,
         split_seed=args.split_seed,
         max_events_per_class=args.max_events_per_class,
     )

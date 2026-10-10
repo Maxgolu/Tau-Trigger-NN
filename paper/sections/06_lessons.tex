@@ -1,0 +1,42 @@
+% ============================================================================
+\section{What it TAUght us}
+\label{sec:lessons}
+% ============================================================================
+
+\paragraph{Design the loss for the decision.}
+Building a task-specific loss meant translating the trigger into rewards, protected regions and a fake-rate constraint, rather than merely choosing a standard classification loss. Its value was control over the efficiency profile, not a guaranteed global gain (\cref{sec:loss,app:analysis_loss}).
+
+\paragraph{More gradient is not more learnability.}
+We initially up-weighted difficult low-energy taus to improve their efficiency; this often hurt. Emphasising cleaner, higher-energy examples worked better for several inputs. Our working explanation is that useful class structure can transfer, whereas ambiguous examples may consume gradient without improving separation. Weighting must reflect what the data and model can learn, not only where we want improvement; this is a problem-dependent lesson (\cref{app:weighting,app:analysis_weighting}).
+
+\paragraph{Understand the input before enlarging the model.}
+The earlier MLP sweep tested networks up to roughly $100$ times larger without improving its small reference, while our gains came from fine-grained EM2 information and compactness features. We learned to question input discrimination before blaming capacity: a larger network cannot restore detail absent from its inputs (\cref{sec:features,app:analysis_capacity,app:analysis_representation}).
+
+\paragraph{Complexity must earn its parameters.}
+Deeper or strided EM2 branches did not systematically beat the simple E1. Local patterns and their positions may already suffice on these small images; E1's dense head also combines them globally, while further compression can lose detail. This is a plausible explanation, not proof of why a particular model lost. We therefore favour the smallest architecture that preserves the required efficiency profile (\cref{sec:arch,app:analysis_capacity}).
+
+\paragraph{Loss (function), but not for nothing.}
+We learned three design requirements the hard way: (i)~reward better ranking, not score inflation; (ii)~give every relevant energy region an explicit reward or protection, or it can be sacrificed; and (iii)~ensure gradients reach missed signal, not just objects already near the threshold. Exact out-of-sample checks and statistically meaningful tolerances complete the recipe. \Cref{app:loss_requirements} details all five lessons and the failures that revealed them.
+
+\paragraph{Let the model see what the decision depends on.}
+The trigger asks whether an event contains two useful TOBs, whereas the
+original network judged each TOB separately. Scoring TOB pairs gives the model
+some event context without requiring a large network over the whole event. The
+final test shows that the selected pair model works better, but it does not by
+itself show whether the gain came from pairing, the encoder or another design
+choice; those questions require matched validation comparisons
+(\cref{sec:input_unit,sec:pair_results}).
+
+\paragraph{One event should count once.}
+An event with $n$ TOBs produces $n(n-1)/2$ pairs. Averaging BCE over all pairs
+would therefore give more weight to events with more TOBs, even though the fake
+rate and efficiency count every event once. We first average the loss within
+each event and then across events. More pairs from one event are not more
+independent evidence (\cref{eq:pair_event_loss}).
+
+\paragraph{Keep the final test independent.}
+A large efficiency gain and a missed fake-rate requirement can both be true.
+We therefore fixed the thresholds, denominators and success requirements before
+the final test. This prevents the small rate excess from being hidden by
+recalibration, while still reporting the useful efficiency improvement
+(\cref{sec:pair_results,app:pair_protocol}).

@@ -1,0 +1,110 @@
+% Detailed diagrams of the core-tensor backbones (V1, V2, V4) and the EM2 branches (E1, E3).
+% Included from Appendix G.
+\definecolor{cbblue}{HTML}{2A78D6}
+\definecolor{cborange}{HTML}{EB6834}
+\definecolor{cbink}{HTML}{52514E}
+\definecolor{cbfill}{HTML}{E6F0FC}
+\definecolor{cbred}{HTML}{E34948}
+\begin{tikzpicture}[
+  font=\scriptsize,
+  >={Stealth[length=1.5mm]},
+  arr/.style={->, draw=cbink, line width=0.5pt},
+  lab/.style={font=\scriptsize, text=cbink, align=center},
+  dim/.style={font=\tiny, text=cbink, align=center},
+  head/.style={draw=cbink, rounded corners=1.5pt, fill=cbink!10, align=center, inner sep=2pt, line width=0.4pt},
+  vec/.style={draw=cbink, fill=cbblue!25, line width=0.4pt},
+]
+% ----------------------------------------------------------------------------
+% helpers
+% \gridsq{x}{y}{n}{cell}{fill}: an n x n grid with lower-left corner (x,y)
+\newcommand{\gridsq}[5]{%
+  \begin{scope}[shift={(#1,#2)}]
+    \fill[#5] (0,0) rectangle (#3*#4,#3*#4);
+    \draw[step=#4, cbink!45, line width=0.2pt] (0,0) grid (#3*#4+0.001,#3*#4+0.001);
+    \draw[cbink, line width=0.4pt] (0,0) rectangle (#3*#4,#3*#4);
+  \end{scope}}
+% \stackmaps{x}{y}{n}{cell}{layers}{offset}: a stack of feature maps, front map at (x,y)
+\newcommand{\stackmaps}[6]{%
+  \foreach \l in {#5,...,2} {
+    \pgfmathsetmacro{\ox}{#1+(\l-1)*#6}
+    \pgfmathsetmacro{\oy}{#2+(\l-1)*#6}
+    \fill[cbfill] (\ox,\oy) rectangle ++(#3*#4,#3*#4);
+    \draw[cbink, line width=0.35pt] (\ox,\oy) rectangle ++(#3*#4,#3*#4);
+  }
+  \gridsq{#1}{#2}{#3}{#4}{white}}
+% ============================================================================
+% (a) Core-tensor backbones
+% ============================================================================
+\node[font=\footnotesize\bfseries, anchor=west] at (-0.3,3.55) {(a) Core-tensor backbones: V1, V2 and their parallel combination V4};
+% input: 5 layers of 3x3
+\foreach \l in {5,...,2} {
+  \pgfmathsetmacro{\ox}{0.0+(\l-1)*0.16}
+  \pgfmathsetmacro{\oy}{0.95+(\l-1)*0.16}
+  \fill[cbfill] (\ox,\oy) rectangle ++(1.05,1.05);
+  \draw[cbink, line width=0.35pt] (\ox,\oy) rectangle ++(1.05,1.05);
+}
+\gridsq{0}{0.95}{3}{0.35}{white}
+% V1 footprint: one cell through all layers (red); V2 footprint: 2x2 block (orange, dashed)
+\draw[cbred, line width=1.1pt] (0.35,1.30) rectangle ++(0.35,0.35);
+\draw[cborange, line width=1.0pt, dash pattern=on 2pt off 1.2pt] (0.02,0.97) rectangle ++(0.68,0.68);
+\node[lab, anchor=north, text width=2.2cm] at (0.75,0.88) {core tensor $5\times3\times3$\\EM0 (front) \dots\ HAD (back)};
+% V1 path (top)
+\draw[arr] (2.25,2.35) -- node[above, lab]{\textcolor{cbred}{V1}: $1\times1\times5$ kernel\\12 filters, 9 positions} (4.55,2.35);
+\stackmaps{4.7}{1.95}{3}{0.28}{4}{0.10}
+\node[dim] at (5.55,1.72) {$12\times3\times3$};
+% V2 path (bottom)
+\draw[arr] (2.25,0.95) -- node[above, lab]{\textcolor{cborange}{V2}: $2\times2\times5$ kernel\\12 filters, 4 positions} (4.55,0.95);
+\stackmaps{4.7}{0.65}{2}{0.28}{4}{0.10}
+\node[dim] at (5.35,0.45) {$12\times2\times2$};
+% flatten + concat
+\node[circle, draw=cbink, inner sep=0.6pt, line width=0.4pt] (catA) at (7.75,1.60) {$\oplus$};
+\draw[arr] (6.05,2.35) -- node[above, sloped, dim]{flatten, 108} (catA);
+\draw[arr] (5.85,0.95) -- node[below, sloped, dim]{flatten, 48} (catA);
+\node[head] (headA) at (9.35,1.60) {dense $[32,16]$\\+ sigmoid};
+\draw[arr] (catA) -- node[above, dim]{156} (headA);
+\node[dim, anchor=north] at (9.35,1.12) {(+ other inputs, e.g.\ $\mathrm{Frac}$)};
+\node (sA) at (10.7,1.60) {$s_{e,i}$};
+\draw[arr] (headA) -- (sA);
+\node[lab, anchor=west, text width=5.2cm] at (11.3,1.55) {V1 or V2 alone keep one path.\\V3 applies a $2\times2\times12$ convolution\\to the V1 maps (output $12\times2\times2$).\\Every convolution is followed by\\BatchNorm and LeakyReLU.};
+% ============================================================================
+% (b) EM2 branches
+% ============================================================================
+\begin{scope}[yshift=-4.6cm]
+\node[font=\footnotesize\bfseries, anchor=west] at (-0.3,3.85) {(b) EM2 branches: E1 (single block) and E3 (strided)};
+% ---- E1 row
+\node[lab, anchor=east] at (-0.1,2.45) {\textbf{E1}};
+\gridsq{0}{1.73}{12}{0.12}{white}
+\fill[cbblue!35] (0.24,2.45) rectangle ++(0.36,0.36);
+\draw[cbred, line width=0.9pt] (0.24,2.45) rectangle ++(0.36,0.36);
+\node[dim, anchor=north] at (0.72,1.68) {$12\times12$ cells};
+\draw[arr] (1.65,2.45) -- node[above, lab]{$3\times3$ conv\\4 filters\\stride 1} (3.3,2.45);
+\stackmaps{3.5}{1.85}{10}{0.12}{4}{0.12}
+\fill[cbblue!35] (3.62,2.81) rectangle ++(0.24,0.24);
+\draw[cbred, line width=0.8pt] (3.62,2.81) rectangle ++(0.24,0.24);
+\node[dim, anchor=north] at (4.1,1.80) {$4\times10\times10$};
+\draw[arr] (5.25,2.45) -- node[above, lab]{max pool\\$2\times2$} (6.5,2.45);
+\stackmaps{6.7}{2.15}{5}{0.12}{4}{0.10}
+\node[dim, anchor=north] at (7.05,2.10) {$4\times5\times5$};
+\draw[arr] (7.75,2.45) -- node[above, dim]{flatten} (8.6,2.45);
+\foreach \k in {0,...,9} \draw[vec] (8.7+0.1*\k,2.35) rectangle ++(0.1,0.2);
+\node[dim] at (9.2,2.12) {100 features};
+\node[lab, anchor=west, text width=5.2cm] at (11.3,2.45) {Each filter is one learned $3\times3$ template, evaluated at all $100$ positions (40 weights in total). Pooling keeps the strongest response in each $2\times2$ neighbourhood.};
+% ---- E3 row
+\node[lab, anchor=east] at (-0.1,0.45) {\textbf{E3}};
+\gridsq{0}{-0.27}{12}{0.12}{white}
+\fill[cbblue!35] (0.0,0.81) rectangle ++(0.36,0.36);
+\draw[cbred, line width=0.9pt] (0.0,0.81) rectangle ++(0.36,0.36);
+\draw[cborange, line width=0.8pt, dash pattern=on 2pt off 1.2pt] (0.24,0.81) rectangle ++(0.36,0.36);
+\node[dim, anchor=north] at (0.72,-0.32) {stride 2: the window\\jumps two cells};
+\draw[arr] (1.65,0.45) -- node[above, lab]{$3\times3$ conv\\8 filters\\stride 2} (3.3,0.45);
+\stackmaps{3.5}{0.15}{5}{0.12}{8}{0.07}
+\node[dim, anchor=north] at (3.9,0.10) {$8\times5\times5$};
+\draw[arr] (4.75,0.45) -- node[above, lab]{$3\times3$ conv\\8 filters} (6.55,0.45);
+\stackmaps{6.7}{0.27}{3}{0.12}{8}{0.06}
+\node[dim, anchor=north] at (6.95,0.22) {$8\times3\times3$};
+\draw[arr] (7.55,0.45) -- node[above, dim]{flatten} (8.6,0.45);
+\foreach \k in {0,...,7} \draw[vec] (8.7+0.1*\k,0.35) rectangle ++(0.1,0.2);
+\node[dim] at (9.1,0.12) {72 features};
+\node[lab, anchor=west, text width=5.2cm] at (11.3,0.45) {The strided first layer learns the down-sampling itself; the second layer sees about $8\times8$ original cells and relates patterns. E2 is the same with a stride-1 convolution and $2\times2$ max pooling instead of the stride.};
+\end{scope}
+\end{tikzpicture}

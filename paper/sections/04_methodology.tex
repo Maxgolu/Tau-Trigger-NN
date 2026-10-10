@@ -1,0 +1,199 @@
+% ============================================================================
+\section{Methodology}
+\label{sec:method}
+% ============================================================================
+To support the changing hardware requirements of \cref{sec:setting}, we studied four complementary axes: data and features (\cref{sec:features}), classifier and loss (\cref{sec:loss}), architecture (\cref{sec:arch}) and the input unit (\cref{sec:input_unit}). Matched comparisons isolate individual mechanisms where possible. Models are named by their inputs, architecture and training objective; \cref{tab:naming} (\cref{app:naming}) explains every name.
+
+% ----------------------------------------------------------------------------
+\subsection{Data exploration and feature engineering}
+\label{sec:features}
+% ----------------------------------------------------------------------------
+We compared class-normalised distributions of $\tau$ and non-$\tau$ objects on the training split, overall and within the $\ptTOB$ intervals $[5,10)$, $[10,20)$, $[20,40)$, $[40,80)$ and $[80,120)\GeV$. A variable carries information beyond energy only if the classes still differ \emph{inside} each interval. All features live in a modular registry and are selected by configuration (\cref{app:features}).
+
+\paragraph{Energy: a strong separator and a shortcut.}
+$\ptTOB$ is the strongest single separator (\cref{fig:features}a). Non-$\tau$ objects pile up at the $\SI{5}{GeV}$ threshold, while $\tau$ objects have a long tail. For the same reason it is a \emph{shortcut}: a network trained with BCE lowers its loss by learning the energy scale and has little incentive to learn the weaker, complementary shape information. This observation motivated the classifier of \cref{sec:loss}.
+
+\paragraph{EM2 compactness.}
+The most useful engineered variable is the fraction of the $12\times12$ EM2 energy contained in its most energetic $3\times3$ cell window:
+\begin{equation}
+  \Frac=\max_{w\in\mathcal{W}}\sum_{(a,b)\in w}E_{ab}\Big/\sum_{a,b}E_{ab},
+  \label{eq:frac}
+\end{equation}
+where $\mathcal{W}$ is the set of the $100$ overlapping $3\times3$ windows (\cref{fig:features}c,d). A cell window is smaller than one tower, so $\Frac$ measures compactness at a granularity the core tensor cannot resolve. Unlike $\ptTOB$, its separation persists within fixed energy intervals and grows with energy (\cref{fig:features}b, \cref{fig:frac_conditioned}).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_features.pdf}
+  \caption{Feature study (training split, normalised per class). (a) $\ptTOB$, log scale. (b) $\Frac$ for $20\leq\ptTOB<\SI{40}{GeV}$; dashed lines mark the medians. (c,d) Computation of $\Frac$ for the objects of \cref{fig:calo_input}: the red square is the best $3\times3$ window.}
+  \label{fig:features}
+\end{figure}
+
+\paragraph{Inputs used below.}
+Besides $\Frac$ (\Ffeat), four inputs stayed competitive at the operating point:
+the 45 raw core cells (\CT), the strongest single input throughout;
+15 per-layer summaries (\SUM), which are the sum $S_\ell$, the dominance $2M_\ell-S_\ell$ ($M_\ell$ the maximum cell) and the sparsity $\#\{\text{cells}>0.1M_\ell\}$ of each layer~\cite{kernan2026};
+the ``core physics'' vector (\CP): BDT score, $\ptTOB$, and $\eta,\phi$ relative to the leading TOB;
+and the EM2 image, which only the CNNs read.
+Event-topology variables (the $\ptTOB$ sum, the second-highest $\ptTOB$, the separation of the two leading TOBs) clearly separate events by $\tau$ multiplicity. However, they take the same value for every object of an event, cannot rank the objects within it, and did not improve on object-level inputs at $\FPRtarget$ (\cref{sec:input_unit}, \cref{app:features}).
+
+% ----------------------------------------------------------------------------
+\subsection{Classifier and loss design}
+\label{sec:loss}
+% ----------------------------------------------------------------------------
+BCE measures the average quality of object-level probabilities. The trigger instead depends on the far tail of the \emph{event-level} background distribution and has explicit requirements per energy region. We addressed this mismatch in three steps, each changing one mechanism: the decision rule, the signal weighting and the training objective.
+
+\paragraph{The TOB--NN OR classifier.}
+Instead of asking a network to relearn the energy threshold, we pair it with the deterministic TOB comparator: accept an object through either branch, then require two accepted objects per event,
+\begin{equation}
+  a_{e,i}=\1[\ptTOBof{e,i}\geq C]\vee\1[s_{e,i}\geq t],\qquad A_e=\1\Big[\textstyle\sum_i a_{e,i}\geq2\Big].
+  \label{eq:or}
+\end{equation}
+The TOB branch protects the high-energy plateau; the NN supplies complementary shape-based decisions. Thresholds are calibrated jointly, counting mixed-branch events exactly. Validation selects the TOB budget $b$ to maximise the equally weighted efficiency gain across $25$--$100\GeV$, subject to the event fake-rate limit and regional protection guards. A smaller selected $b^\star$ suggests less reliance on the comparator, not a standalone measure of NN quality. Training remains (weighted) BCE; the OR changes the decision rule only. \Cref{app:or} gives the objective, cross-fitted calibration, guards and earlier two-expert trial.
+
+\paragraph{Spectrum-aware signal weighting.}
+We reweight each object's contribution to binary cross-entropy:
+\begin{equation}
+  \mathcal L_{\mathrm{wBCE}}=-\frac1N\sum_i w_i\big[y_i\log s_i+(1-y_i)\log(1-s_i)\big],
+  \label{eq:weighted_bce}
+\end{equation}
+where $y_i$ is the signal label and $s_i$ the NN score. Background keeps $w_i=1$; for signal, $w_i=r(t_i)/\langle r\rangle_{\mathrm{train},S}$, with truth momentum $t_i$ in GeV. Mean-one normalisation preserves the total signal weight while redistributing its gradient across energies. We compare two raw profiles:
+\begin{equation}
+  \begin{aligned}
+    r_{\mathrm{IF}}(t)&=\operatorname{clip}\!\left(\bar n/n_{k(t)},\,0.2,\,5\right),
+    & r_p(t)&=\operatorname{clip}(t,10,200)^{-p}.
+  \end{aligned}
+  \label{eq:powerlaw}
+\end{equation}
+\emph{Inverse frequency} (IF) uses the training-signal count $n_k$ in each populated $5\GeV$ bin over $25$--$100\GeV$, with $\bar n$ their mean; outside these bins, $r_{\mathrm{IF}}=1$. Rare bins receive larger weights, approximately balancing their total influence. \emph{Power-law weighting} varies smoothly: $p=-1$ doubles the weight when energy doubles away from the clamp, whereas $p=0$ recovers BCE. Since soft taus dominate the sample, both IF and negative $p$ shift learning towards rarer, cleaner energetic examples without resampling the data. This often helped more than further emphasising ambiguous low-energy taus, but depended on the inputs. Full profiles, scans and the transfer hypothesis appear in \cref{app:weighting}; comparisons are in \cref{app:analysis_weighting}.
+
+\paragraph{A constrained trigger objective.}
+A fixed weight profile applies the same emphasis whether or not a protection is at risk. Our last step therefore optimises the trigger objective itself. It had a second, more general aim: to find out what a loss that truly represents the trigger problem must look like, and which properties it must have. We collect these conclusions in \cref{sec:lessons}. The problem is
+\begin{equation}
+  \max_\theta\sum_{k\in\Kset_J}w_k\big[\eff_k(\theta)-\effTOB_k\big]\quad\text{s.t.}\quad\FPRev(\theta)\leq\FPRtarget,\;\;\eff_k(\theta)\geq r_k\;\;(k\in\Kset_C).
+  \label{eq:constrained}
+\end{equation}
+In the original MLP formulation, the regions to improve, $\Kset_J=\{[25,32),[32,40),[40,60)\}\GeV$, are kept separate from the regions to protect, $\Kset_C=\Kset_J\cup\{[60,120)\}$. The saturated region is protected but not rewarded, because there is almost no room for gain there and its measurement is dominated by noise. The CNN extension also rewards $60$--$100\GeV$ and splits the saturation guards (\cref{app:constrained}). We train on the Lagrangian of~\eqref{eq:constrained}:
+\begin{equation}
+  \mathcal{L}(\theta,\lambda)=
+  -\underbrace{\sum_{k\in\Kset_J}w_k\big[\tilde\eff_k(\theta)-\effTOB_k\big]}_{\text{reward: turn-on gain}}
+  +\lambda_{\mathrm{FPR}}\underbrace{\frac{\widetilde{\FPR}(\theta)-\FPRtarget}{\FPRtarget}}_{\text{fake-rate violation}}
+  +\sum_{k\in\Kset_C}\lambda_k\underbrace{\big(r_k-\tilde\eff_k(\theta)\big)}_{\text{deficit in region }k}.
+  \label{eq:lagrangian}
+\end{equation}
+\begin{itemize}
+  \item The \emph{reward} is the efficiency gain over the baseline in the turn-on regions. For the MLP, its fixed weights $w=(0.35,0.35,0.30)$ state our physics preference. They are not learned, because an optimiser allowed to choose them would put all the weight on the easiest region.
+  \item The \emph{fake-rate term} measures the violation relative to the $0.5\%$ target. Without this normalisation, an excess of one per mille would be numerically invisible next to an efficiency deficit of the same physical importance.
+  \item Each \emph{region term} compares the efficiency with a floor $r_k$. The floor requires a small margin over the baseline and allows at most a small loss relative to the pretrained starting model.
+  \item The multipliers $\lambda\geq0$ act as adaptive prices. The network parameters $\theta$ descend on $\mathcal{L}$ with Adam. Each price starts at zero, rises by projected dual ascent only while its constraint is \emph{measured} to be violated by the exact deployed rule, and falls back when it is satisfied~\cite{cotter2019proxy}. A fixed weight profile is the special case in which these prices are guessed in advance.
+\end{itemize}
+The hard threshold and two-object event rule have no useful gradient, so training uses smooth approximations while constraint checks use exact decisions. Four choices stabilise this separation:
+\begin{enumerate}[label=(\roman*),itemsep=1pt,topsep=2pt]
+  \item \textbf{Recalibrate the proxy threshold.} A batch-wise background quantile prevents uniformly raising all scores from appearing to improve classification.
+  \item \textbf{Anneal the temperature.} A broad early sigmoid reaches more objects; cooling from $0.10$ to $0.02$ sharpens it towards the hard decision.
+  \item \textbf{Measure violations out of sample.} Cross-fitting on a held-out $30\%$ of training events prevents optimistic in-sample estimates from suppressing the dual updates.
+  \item \textbf{Start from a trained model and respect uncertainty.} Fine-tune a BCE-based checkpoint, allow statistically meaningful tolerances and calibrate deployment conservatively.
+\end{enumerate}
+\Cref{app:constrained} gives the equations, feasibility rules and discarded variants.
+
+% ----------------------------------------------------------------------------
+\subsection{Architectures}
+\label{sec:arch}
+% ----------------------------------------------------------------------------
+Every model in this paper is assembled from the same parts (\cref{fig:arch}a). Optional convolutional branches read the core tensor and the EM2 image, their outputs are concatenated with scalar inputs, and a $[32,16]$ dense head produces the object score. The model names in \cref{tab:naming} describe which parts are used.
+
+\paragraph{MLP.}
+The reference model is the $[32,16]$ ReLU MLP with a sigmoid output of~\cite{kernan2026}. On the 45 core cells plus $\Frac$ (\CT+\Ffeat, 46 inputs) it has $2{,}049$ parameters. Larger MLPs did not help~\cite{kernan2026}, so we looked for a better inductive bias rather than more capacity.
+
+\paragraph{Convolutions on the core tensor.}
+A flat MLP must learn from data that neighbouring cells are adjacent. A convolution builds in locality and weight sharing instead. Many hand-made features are in fact fixed convolutions followed by pooling; $\Frac$, for example, is an all-ones $3\times3$ kernel, a global maximum and a division. We tested four backbones on the $5\times3\times3$ tensor. V1 mixes the five layers at every cell ($1\times1\times5$ kernel) and learns longitudinal profiles. V2 learns local spatial patterns ($2\times2\times5$ kernel). V3 applies them in series, and V4 in parallel. Because the window is centred on the TOB seed, position matters, so the maps are flattened rather than pooled. \Cref{app:vbackbones} explains each backbone step by step, and \cref{fig:cnn_blocks}a draws them.
+
+\paragraph{A branch for the full-granularity EM2 layer.}
+Following~\cite{ayyar2020cnn,icecube2025cnn,kim2023hotspots}, the $12\times12$ EM2 image gets its own branch. E1 applies one $3\times3$ convolution with four filters and $2\times2$ max pooling. E2 adds a second convolution block. E3 learns its down-sampling with a stride-2 convolution. The \emph{dual-branch} model concatenates a V-backbone, an E-branch and optionally $\Frac$ into one head. \Cref{app:ebranches} and \cref{fig:cnn_blocks}b give the details.
+
+\paragraph{Is $\Frac$ still needed next to the EM2 branch?}
+Although $\Frac$ is derived from EM2, a small CNN need not learn its global normalisation easily. We therefore compare matched models with and without the scalar: does an explicit scale-free ratio complement learned local patterns? The ablation is reported in \cref{app:analysis_representation}; the architectural rationale is in \cref{app:fraction_complementarity}.
+
+\paragraph{Towards a smaller model: EM2 only.}
+EM2's strong contribution motivated removing the core convolution, but not the core measurements: the 45 cells or 15 layer summaries enter the dense head as scalars beside the E-branch and $\Frac$. This tests whether spatial processing is worth its parameter cost (\cref{app:em2only,app:analysis_representation}).
+
+\paragraph{Stability and simplicity.}
+Every convolution is followed by BatchNorm~\cite{ioffe2015batchnorm} and LeakyReLU~\cite{maas2013leaky}, which keeps training stable on this highly imbalanced data. Inputs are standardised energies (\cref{app:arch}). Their performance is compared in \cref{sec:analysis}. All parameter counts are listed in \cref{tab:params}.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/fig_architecture}}
+  \caption{Overview of the single-object pipeline. (a) How every model is assembled: optional convolutional branches on the core tensor (V1--V4) and on the EM2 image (E1--E3), concatenated with scalar inputs such as $\Frac$, feed a $[32,16]$ head. The MLP uses flat inputs only. (b) How object scores become an event decision (\cref{sec:setting,sec:input_unit}): one shared network scores every TOB; the OR classifier also accepts an object when $q_{e,i}=\ptTOB\geq C$; the event fires with at least two accepted objects.}
+  \label{fig:arch}
+\end{figure}
+
+% ----------------------------------------------------------------------------
+\subsection{From individual TOBs to TOB pairs}
+\label{sec:input_unit}
+% ----------------------------------------------------------------------------
+\paragraph{Scoring one TOB at a time.}
+All models above score each TOB independently, with one shared network applied to that object's inputs. The event decision is taken afterwards by the counting rule~\eqref{eq:event_decision} or by the OR rule~\eqref{eq:or} (\cref{fig:arch}b). The decision is therefore independent of TOB order. One small circuit can be replicated for every TOB slot. Training uses object labels, while calibration and evaluation are done at event level. The price is that the network sees no event context: an event-level input is identical for all objects of an event, so it cannot rank them.
+
+\paragraph{Scoring two TOBs together.}
+The single-object rule can accept two individually plausible TOBs without
+asking whether they form a plausible di-tau candidate. We therefore changed
+what the network sees. Within the at-most-six retained TOBs of each event, we
+keep those with finite measured $\ptTOB$ and sort them by decreasing $\ptTOB$;
+increasing \code{tob\_index} breaks exact ties. Every unordered pair $(i,j)$
+with $i<j$ is scored once. We do not add a dummy pair. An event with fewer than
+two finite TOBs therefore cannot pass through the neural branch. This keeps the
+$\ptTOB$ baseline unchanged: the largest lower $\ptTOB$ among all pairs is the
+second-highest finite $\ptTOB$ in the event.
+
+\paragraph{The same encoder is used for both TOBs.}
+The final pair model processes both TOBs with the same weights. Each TOB
+contributes an unnormalised absolute-scale $12\times12$ EM2 image and a signed
+shape channel $E/\max(\sum_{ab}|E_{ab}|,1\,\mathrm{MeV})$, together with the 45
+coarse calorimeter cells, measured $\ptTOB$ and $\Frac$. One event-level
+second-highest-$\ptTOB$ value is also given to the dense head. A
+one-convolution image branch and a 16-unit scalar branch produce a 16-value
+representation of each TOB. The two representations and the event value then
+enter a $[32,16,1]$ head. The complete model has $4{,}357$ trainable
+parameters. Sharing the encoder makes both TOBs follow the same rule, while the
+final head can learn whether their calorimeter patterns form a useful pair.
+
+\paragraph{Every event receives equal weight during training.}
+The training label is positive when both TOBs are labelled as tau candidates
+and negative when neither is. Pairs with one labelled and one unlabelled TOB
+are omitted from training; this label does not prove that the two TOBs match
+two distinct generator taus. For a positive pair, the $p=-1$ weight
+of~\eqref{eq:powerlaw} uses the smaller associated truth momentum; negative
+pairs keep unit weight. An event with many TOBs produces many more pairs. If we
+simply averaged the loss over pairs, such events would also receive more
+weight. We instead average weighted BCE over the pairs of each event and then
+average those event losses. A batch contains all retained pairs from up to 256
+shuffled events:
+\begin{equation}
+  \mathcal{L}_{\mathrm{pair}}
+  = \frac{1}{|\mathcal{B}|}
+    \sum_{e\in\mathcal{B}}
+    \frac{1}{|\mathcal{P}_e|}
+    \sum_{(i,j)\in\mathcal{P}_e}
+    w_{e,ij}\,\ell_{\mathrm{BCE}}(s_{e,ij},y_{e,ij}).
+  \label{eq:pair_event_loss}
+\end{equation}
+Thus every event contributes equally, regardless of its number of finite TOBs.
+Truth information is used only to define training labels and weights. During
+validation and testing, the model scores every pair without truth filtering.
+
+\paragraph{From pair scores to one trigger decision.}
+The neural event score is the maximum pair score,
+$s_e=\max_{(i,j)\in\mathcal{P}_e}s_{e,ij}$. The $\ptTOB$ branch uses
+$q_e=\max_{(i,j)\in\mathcal{P}_e}\min(\ptTOBof{e,i},\ptTOBof{e,j})$, and the
+final event decision is
+\begin{equation}
+  A_e=\1[s_e\geq t]\vee\1[q_e\geq C].
+  \label{eq:pair_decision}
+\end{equation}
+The two branches share one event-level background budget, so an event accepted
+by both is counted once. Checkpoints, the neural threshold and the
+$\ptTOB$-branch budget are selected on validation independently for seeds 42,
+123 and 456.
+The three trained models are reported separately and averaged only when the
+results are summarised; they are not combined into an ensemble. Exact
+construction, training and final-test details appear in
+\cref{app:pair_protocol}.

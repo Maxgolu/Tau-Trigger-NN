@@ -1,0 +1,116 @@
+% ============================================================================
+\FloatBarrier
+\section{Results and Benchmarking}
+\label{sec:results}
+% ============================================================================
+Unless stated otherwise, our results use the fixed-rate protocol of \cref{sec:setting}: achieved event fake rates are $0.498$--$0.499\%$, band efficiencies pool tau counts, and entries are three-seed means with standard errors. Checkpoints and OR budgets are selected on validation; test-background recalibration is used only for fixed-rate reporting. Ranking finished configurations is descriptive, not a further unbiased test. The prior-work reference has a different protocol (\cref{app:prior_reference}). \Cref{tab:naming} decodes all model names; IF denotes inverse-frequency weighting, whereas $p$ denotes the separate $t^{-p}$ profile.
+
+% ----------------------------------------------------------------------------
+\subsection{Benchmark: performance under different size and plateau requirements}
+\label{sec:benchmark}
+% ----------------------------------------------------------------------------
+\Cref{tab:results_main} selects the highest-global-efficiency model satisfying each row's criterion. \emph{All bands} means that the three-seed mean exceeds the baseline in every reported band, not that every seed does so. These are candidates for hardware evaluation, not validated FPGA implementations.
+
+% Keep the benchmark plot and its table together, after the Section 5 heading.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_results_main.pdf}
+  \caption{(a) Benchmark turn-ons; model numbers refer to \cref{tab:results_main}. The inset shows saturation, and the lower panel shows gains over the eFEX baseline. Shading indicates statistical uncertainty. (b) Prior-work NN and baseline fits from~\cite{kernan2026}, shown as a separate historical reference. The newly supplied band averages in \cref{tab:results_main} are not point samples of this fit (\cref{app:prior_reference}). Model-name key: \cref{tab:naming}.}
+  \label{fig:results_main}
+\par\medskip
+  \begingroup
+  \centering
+  \captionof{table}{Benchmark efficiencies [\%] by true-$\pT$ band [GeV]. Red marks our values below the baseline; counts include BatchNorm. The prior-work row is a separately evaluated reference, not part of the ranking. Model-name key: \cref{tab:naming}; provenance: \cref{app:prior_reference}.}
+  \label{tab:results_main}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \input{tables/tab_main}
+  \endgroup
+\end{figure}
+
+The practical trade-off is clear: all five models turn on earlier, but the highest global efficiency, strongest plateau and smallest network do not coincide. The compact MLP retains much of the CNN gain at less than a quarter of the largest model's size. Seed-level plateau behaviour and the NN-only alternative to the compact OR model are detailed in \cref{app:benchmark_detail}.
+
+% ----------------------------------------------------------------------------
+\subsection{What the results tell us}
+\label{sec:analysis}
+% ----------------------------------------------------------------------------
+\Cref{fig:results_analysis} highlights two controlled comparisons. The supporting tables, uncertainties and broader evidence are collected in \cref{app:analysis_weighting,app:analysis_representation,app:analysis_capacity,app:analysis_loss}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_results_analysis.pdf}
+  \caption{(a) Remaining OR trade-off after inverse-frequency (IF) weighting: adding the comparator exchanges low-energy efficiency for plateau gains. Both sides use IF; the BCE-to-IF comparison is in \cref{tab:analysis}. (b) Effect of adding EM2 and $\Frac$, then removing the core convolution. Abbreviations: \cref{tab:naming}. Supporting comparisons: \cref{app:analysis_weighting,app:analysis_representation}.}
+  \label{fig:results_analysis}
+\end{figure}
+
+\paragraph{(a) More weight on energetic taus can help.}
+The results support the hypothesis in \cref{sec:loss}: emphasising energetic rather than soft taus often helped. Compared with BCE, IF reduced the selected TOB budget (\cref{tab:analysis}). \Cref{fig:results_analysis}a shows the resulting trade-off: after IF training, OR buys a small plateau gain at a larger low-energy cost, so NN-only can win globally. This is input-dependent, not a universal preference for IF or negative $p$ (\cref{app:analysis_weighting}).
+
+\paragraph{(b) Spatial learning and engineered features complement each other.}
+CNNs recovered some taus missed by the MLP, consistent with sensitivity to spatial shower patterns. The larger gain came from the fine-grained EM2 input; adding $\Frac$ remained useful, while removing the core convolution retained most performance with fewer parameters (\cref{app:analysis_representation}).
+
+\paragraph{(c) More parameters were not the main route to improvement.}
+Wider MLPs and deeper CNNs gave no systematic advantage in the tested families. Similar errors across core-only models point to limited input discrimination rather than insufficient capacity (\cref{app:analysis_capacity}).
+
+\paragraph{(d) The objective controls the trade-off across energies.}
+Constrained fine-tuning redistributed efficiency towards protected or rewarded regions, usually with a small global change. The best loss depended on the inputs, and the lowest-energy band remained difficult across methods (\cref{app:analysis_loss}).
+
+% ----------------------------------------------------------------------------
+\subsection{Final evaluation of the pair model}
+\label{sec:pair_results}
+% ----------------------------------------------------------------------------
+\paragraph{Seeing two TOBs together improves the turn-on.}
+The selected model scores every pair of finite-$\ptTOB$ TOBs and gives every
+event equal weight during training. Unlike the fixed-rate comparisons above,
+we did not recalibrate its thresholds on the test set. The checkpoint and both
+branch thresholds were selected on validation and then applied unchanged; the
+$\ptTOB$ baseline uses
+$q_e\geq\SI{19.4}{GeV}$. The final test contains $64{,}286$ events:
+$14{,}509$ signal and $49{,}777$ background events. Its $361{,}685$ finite
+TOBs form $866{,}872$ unordered pairs; 589 events contain fewer than two finite
+TOBs and therefore fail both branches. The selected epochs are 17, 18 and 20
+for seeds 42, 123 and 456, respectively.
+
+For this subsection only, signal efficiency is the fraction of signal events
+that fire. Elsewhere in the paper it is the fraction of truth-$\tau$ objects
+accepted, so the two percentages are not directly comparable. For the
+energy-bin results, we use eligible signal events in which a pair among the
+four highest-$\ptTOB$ TOBs has two positive training labels and two finite
+truth momenta. The event is assigned the lower of those two momenta. These
+values are therefore also not directly comparable with
+\cref{tab:results_main,fig:results_main}.
+
+\begin{table}[H]
+  \centering
+  \caption{Final pair model test efficiency and achieved event fake rate. The
+  baseline is the second-highest finite-$\ptTOB$
+  rule. Differences are paired within the same $14{,}509$ signal events.}
+  \label{tab:pair_final}
+  \small
+  \setlength{\tabcolsep}{7pt}
+  \input{tables/tab_pair_final}
+\end{table}
+
+Across the three models, mean signal efficiency rises from $34.30\%$ to
+$46.70\%$, a mean gain of 12.40 percentage points with a standard deviation of
+0.32 points across seeds
+(\cref{tab:pair_final}). The gain is concentrated in the turn-on energy
+ranges: the mean differences are 21.43 points for $10$--$25\GeV$ and
+22.19 points for $25$--$60\GeV$, while the already saturated region above
+$60\GeV$ gains 0.78 points. This establishes the performance of the selected
+pair model; the final test alone does not show which design choice caused the
+improvement.
+
+\paragraph{The efficiency gain comes with a small rate excess.}
+The three test event fake rates, $0.5183$--$0.5223\%$, are all above the
+required $0.5\%$. Seed 42 also misses the adjusted high-energy significance
+requirement ($p_{\mathrm{adj}}=0.05946$). Our final success criterion required
+both conditions, so it is not met, even though every model improves the
+overall efficiency.
+The operating point should be recalibrated on a new calibration sample before
+deployment; the test set must not be reused for that correction. A
+repository-local identity audit found no overlap with the enumerated Phase-5
+confirmation archives. Complete absence of every possible historical or
+external test exposure cannot be proven, so the result should be interpreted
+with that exposure uncertainty. Exact thresholds, hashes and uncertainty
+procedures appear in \cref{app:pair_protocol}.

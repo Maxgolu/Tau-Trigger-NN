@@ -1,0 +1,75 @@
+{
+  "schema_version": "university-submission-final-system-v1",
+  "status": "release_candidate_uncommitted",
+  "candidate": "all_finite_equal_event",
+  "repository_history": {
+    "origin_main_base": "92a6edf60734db123cadc23626ce36c14b97b314",
+    "pair_public_base": "424edf7ee5d773c43f2c049abade708680fbddfc",
+    "release_commit": null
+  },
+  "file_bindings": {
+    ".github/workflows/ci.yml": "444d8ec42591b9da68234e7cedc01326bb5059b4b76ede32c51c8a824ccaddf7",
+    "configs/pair_final_all_finite_equal_event/config.json": "de284065966ec90ec1e4e92c06f1b42cb87495b37916f23587ae14bfd0d17b2d",
+    "demo/expected_output.json": "b2bd1a07b412fcd13be36243769b4da76ac3aa1f33719eba5ed57e9a4567c79b",
+    "demo/run_demo.py": "89b9fb1700cf1454bb2d3ed28a52a548e1844fc7e7e38930d410e6ea30ebda9e",
+    "demo/verify_demo.py": "3ad4227db1c0406136e0526fa175395a24610f3c18927eb2bfa3dc196f5710f7",
+    "requirements.txt": "e4fedb2fcd22310957fb57d84dedf42d5674b37a42b4c0a540eecddcf0066ab8",
+    "results/final_test/final_result_summary.json": "f1cb93b206cd6ff5ba143c570d3b18cd6cc33abf9ce707dcb434d2af2bfdc63a",
+    "results/final_test/seed_results.csv": "5b5e11911f21d029d43c78fd60fc81bfe24d2e7092abe6aa1a80e4ccaa00841a",
+    "src/pair_data.py": "fdffd5098650ab1d1a2f431594b686bcd0230cf0cc5c1ce18a912824ac6a2107",
+    "src/pair_features.py": "19b54e19d7d1d7b5e353c9ac547553925835d92d07ad2c9d6aa4e1d52fc91df6",
+    "src/pair_models.py": "5d9b3fdee3578dde5c1b9825d3ff77f440fa2d3da550b2c9b44c79958bb229cc",
+    "src/pair_train.py": "2f52786b5fb8189015d0ca800281c8ccb29231c7da434e26c8e3c56f151b1179",
+    "src/prepare_pair_data.py": "05c95b329d497e92ad5ccfded7cc884117e1540389dc7f2a39db3ea091f13e59",
+    "src/pair_predict.py": "0cfa7970994e6360d5de9aa2f85e86ed6389293de1878b17c30467599e9e3ec9",
+    "src/pair_classifiers.py": "2f9630c59253f5b93f744dd3c72085ffafe30337a276c795d30a4078cf5ccf93",
+    "submission/verify_report.py": "ee04e3aec28d8f29d778a6bb7641b92643510e338ecb012603848814d4507a35",
+    "submission/verify_submission.py": "f74f08cee3d7f6ab9dd20888e78ac844600b857684c1959536abaf88be17acf5"
+  },
+  "external_data_bindings": {
+    "signal_csv_sha256": "857715d639a863f212512c4f3503acad7066ca21a4439a1f6cca9aad22b5e2f6",
+    "background_csv_sha256": "cd9b156ab287f544cde873ac4ab374d6c26ea1ff2e18e905ca3189463711ad7b",
+    "signal_npz_sha256": "09532fd496dc51ffe2b24fff78ad9a8775ba0eaa0b638a7c77096ade49263f48",
+    "background_npz_sha256": "7c37cf9f4a1172b900f9ad5e03b661ce7ad6002fd3b4da56702f447920bcaa9a",
+    "event_identity_manifest_sha256": "abf2fc3189c3378153322a76ef7c80c8d225e243b78aa9be05eb2eda7e7b43f1"
+  },
+  "preprocessing": {
+    "members": "all finite retained TOBs, descending measured pT, exact ties by ascending tob_index",
+    "pairs": "all unordered same-event pairs a<b; no synthetic pair",
+    "training_filter": "remove mixed operational-label pairs only during training",
+    "inference_filter": "none; all finite pairs are scored",
+    "event_aggregation": "maximum neural pair logit; no-pair sentinel negative infinity",
+    "normalizer_sha256": {
+      "parent": "7b8ace3cc8027845f4e2c505010b60292000a15a650cdf51881176d1f16f7ae9",
+      "absolute_mean": "20727981985ad569b0f41622ca2d5eb468fb2fb48c07a9473fd5d6d1b5814629",
+      "absolute_scale": "19a4f6b6c2c878c8dffd9253c2533ad15eb9f244c7737f5444fd78da18a697d2",
+      "normalized_mean": "f5ad4b871453e876a46f7c66a32a84b1b006b74f927507cf46f42dc6584027a4",
+      "normalized_scale": "46a0fd0cc72056a56cc90bd5988083c95a43d53d1489e5df86c0490eb247dcac"
+    }
+  },
+  "training": {
+    "architecture": "shared two-channel high-resolution EM2 member encoder and ordered pair head",
+    "trainable_parameters": 4357,
+    "objective": "p=-1 positive weighting with mean within complete event, then mean across events",
+    "seeds": [42, 123, 456],
+    "epochs": 20,
+    "ensemble": false
+  },
+  "selected_systems": {
+    "42": {"epoch": 17, "checkpoint_sha256": "b6f74de01e81fb1cefb3b2221e7012bb1d99a5d8315790a6292f99710a5da605", "neural_threshold": 0.20193341374397278, "pt_threshold_gev": 127.50000000000001},
+    "123": {"epoch": 18, "checkpoint_sha256": "0b8147d99078b975cda6fab0ddbabacf29bb4c2880171dccfe3c9e4ae14fb02a", "neural_threshold": 0.3519463837146759, "pt_threshold_gev": 33.8},
+    "456": {"epoch": 20, "checkpoint_sha256": "12e193189d585d534a466c5fc6678a3972eca671c361f112ceed5928470a16c3", "neural_threshold": 0.4000909924507141, "pt_threshold_gev": 33.8}
+  },
+  "final_result": {
+    "signal_event_denominator": 14509,
+    "background_event_denominator": 49777,
+    "candidate_seed_mean": 0.4669974958072001,
+    "candidate_seed_sample_sd": 0.0032020033231709927,
+    "baseline_efficiency": 0.3429595423530223,
+    "mean_paired_improvement_percentage_points": 12.403795345417785,
+    "background_fpr_range": [0.005183116700484159, 0.005223295899712719],
+    "predeclared_conjunctive_success_rule_passed": false,
+    "seed_aggregation": "arithmetic mean and sample standard deviation; no event pooling and no model ensemble"
+  },
+  "historical_exposure_disclosure": "Repository-local identity auditing found no overlap with enumerated Phase-5 confirmation archives, but absence of every possible historical or external test exposure cannot be proven."
+}

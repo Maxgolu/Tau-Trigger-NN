@@ -1,0 +1,109 @@
+% ============================================================================
+%  Compact Neural Networks for Level-1 Di-Tau Triggering
+%  Workshop on Deep Learning (0368-3538-01), Tel Aviv University
+%
+%  Build: pdflatex main -> bibtex main -> pdflatex main -> pdflatex main
+%  (Overleaf does this automatically.)
+% ============================================================================
+\documentclass{article}
+
+% "preprint" removes line numbers and anonymisation; the footer is replaced below.
+\PassOptionsToPackage{numbers,sort&compress}{natbib}
+\usepackage[preprint]{neurips_2025}
+% Wider text block than the NeurIPS default (6.5in instead of 5.5in, 1in side margins).
+\AtBeginDocument{\newgeometry{textheight=9in,textwidth=6.5in,top=1in,headheight=12pt,headsep=25pt,footskip=30pt}}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsfonts,mathtools}
+\usepackage{bm}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{capt-of}
+\usepackage{placeins}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,calc,shapes.geometric}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage[capitalize,noabbrev]{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+\setlist{itemsep=1pt,topsep=2pt,parsep=0pt,leftmargin=1.3em}
+
+% Replace the NeurIPS footer on the first page.
+\makeatletter
+\renewcommand{\@noticestring}{Workshop on Deep Learning (0368-3538-01), Tel Aviv University, 2026.}
+\makeatother
+
+\input{macros}
+
+\hypersetup{pdftitle={TAUminator: Compact Neural Networks for Tau Triggering},
+            pdfauthor={Max Golubkov, Tamar Averbuch}}
+
+\newcommand{\repourl}{https://github.com/Maxgolu/Tau-Trigger-NN}
+\newcommand{\tauaffil}{{\small\href{https://en.cs.tau.ac.il/computer}{\color{black}Blavatnik School of Computer Science and AI}}}
+
+% Title with the image on the left, between the two title rules.
+% To go back to the TikZ emblem, replace the \includegraphics line with \input{figures/emblem}.
+\newlength{\emblemwidth}
+\setlength{\emblemwidth}{2.2cm}
+\title{%
+  \begin{tabular}{@{}m{\emblemwidth}@{\hspace{1em}}m{0.66\linewidth}@{\hspace{1em}}m{\emblemwidth}@{}}
+    \includegraphics[width=\emblemwidth]{figures/title_image.jpg} &
+    \centering {\huge TAUminator:}\par\vspace{5pt}{\Large Compact Neural Networks for Tau Triggering} &
+    \mbox{}
+  \end{tabular}%
+}
+
+\author{%
+  Max Golubkov \\
+  \tauaffil \\
+  Tel Aviv University \\
+  \texttt{maximg@mail.tau.ac.il} \\
+  \And
+  Tamar Averbuch \\
+  \tauaffil \\
+  Tel Aviv University \\
+  \texttt{averbuch2@mail.tau.ac.il} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\input{sections/01_introduction}
+\input{sections/02_background}
+\input{sections/03_setting}
+\input{sections/04_methodology}
+\input{sections/05_results}
+\input{sections/06_lessons}
+\input{sections/07_future}
+
+\section*{Acknowledgements}
+We thank Dror Kernan, Talya Areva Cohen, Liron Barak, Shimon Shahar, Yuval Fried, Magda Diamantopoulou and Tomer Gavish for their support and collaboration. Their contributions included the initial code setup, data provision and guidance, and physics expertise that helped us understand the trigger problem and interpret our results.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\newpage
+\appendix
+\input{appendix/A_detector_data}
+\input{appendix/B_features}
+\input{appendix/C_calibration}
+\input{appendix/D_or_classifier}
+\input{appendix/E_weighting}
+\input{appendix/F_constrained}
+\input{appendix/G_architectures}
+\input{appendix/H_training}
+\input{appendix/I_results}
+\input{appendix/J_future}
+\input{appendix/K_pair_object}
+
+\end{document}

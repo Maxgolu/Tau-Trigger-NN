@@ -1,0 +1,94 @@
+% ============================================================================
+\section{The Constrained Trigger Objective}
+\label{app:constrained}
+% ============================================================================
+
+\subsection{Problem}
+Let $s_i=f_\theta(x_i)$. Under the NN-only classifier an object passes when $s_i\geq t$. Under the OR classifier it passes when $(\ptTOBof{i}\geq C)\vee(s_i\geq t)$. The same event rule~\eqref{eq:event_decision} applies in both cases. One list of energy regions should not serve two purposes: improvement is wanted where there is room for it, while protection is needed everywhere. The objective regions and weights are
+\begin{equation}
+  \Kset_J=\{[25,32),[32,40),[40,60)\}\GeV,\qquad w=(0.35,0.35,0.30),\quad\textstyle\sum_k w_k=1,
+\end{equation}
+and the constraint regions are $\Kset_C=\Kset_J\cup\{[60,120)\}$. The turn-on window is split at $\SI{32}{GeV}$ because the measured advantage changes strongly inside $[25,40)$. The saturated region is left out of the objective: its attainable gain is bounded by $1-\effTOB_{60:120}\approx0.03$, and its measured advantage is comparable to its statistical uncertainty. The weights encode a fixed scientific preference and are not learned, because an optimiser allowed to choose them would put all weight on the easiest region. Each constraint region carries the floor
+\begin{equation}
+  r_k=\min\Big[1,\;\max\big(\effTOB_k+m_k,\;\eff_k^{(0)}-\rho_k\big)\Big],
+  \label{eq:floor}
+\end{equation}
+where $m_k$ is the required advantage over the baseline, $\eff_k^{(0)}$ is the efficiency of the frozen pretrained network, and $\rho_k$ is the largest loss allowed relative to it. We use $m=(0.0025,0.0025,0.0025,0)$ and $\rho=(0.0025,0.0025,0.0025,0.005)$. The second term is needed because fine-tuning starts from a strong model: a guard that protects only the baseline allowed the network to give up part of an advantage it already had. The complete problem is
+\begin{equation}
+  \max_\theta\;J(\theta)=\sum_{k\in\Kset_J}w_k\big[\eff_k(\theta)-\effTOB_k\big]
+  \quad\text{s.t.}\quad\FPRev(\theta)\leq0.005,\quad\eff_k(\theta)\geq r_k\;\;\forall k\in\Kset_C .
+\end{equation}
+
+\subsection{Differentiable surrogate}
+The hard threshold and the ``at least two'' count have zero gradient almost everywhere. The network update therefore uses smooth surrogates, while every constraint measurement uses the exact hard decisions.
+The construction replaces an object step by a temperature-controlled sigmoid and the event count by the probability of at least two successes under the surrogate's independent Bernoulli decisions. This is a differentiable device, not an assumption that physical objects within an event are independent. As $T\to0$, it approaches the hard decision away from threshold ties.
+\begin{description}[leftmargin=0pt,itemsep=2pt]
+  \item[Soft object decision.] $q_i=\sigmoid\big((z_i-t_{\mathrm{proxy}})/T\big)$, where $z_i$ is the pre-sigmoid score (logit) of object $i$. For the OR classifier the comparator stays hard: $q_i^{\mathrm{OR}}=h_i+(1-h_i)q_i$ with $h_i=\1[\ptTOBof{i}\geq C]$.
+  \item[Rank-calibrated proxy threshold.] In every batch, $t_{\mathrm{proxy}}$ is recomputed as the empirical background quantile that matches the $0.5\%$ event target, taken from the ranked second-highest object logits of the background events in the batch. A common shift of all scores then moves the threshold by the same amount, so the score-inflation direction carries no gradient.
+  \item[Temperature annealing.] The gradient of $q_i$ is proportional to $q_i(1-q_i)/T$ and becomes negligible for $|z_i-t_{\mathrm{proxy}}|\gtrsim3T$. A small temperature $T$ gives a faithful surrogate that sees only a narrow band around the boundary. A large $T$ reaches distant objects but optimises a blurred trigger. $T$ therefore follows a cosine schedule from $0.10$ to $0.02$.
+  \item[Event surrogate.] The probability that at least two objects pass is the Poisson-binomial tail
+  \begin{equation}
+    \tilde P_e^{(2)}=1-\prod_{i\in e}(1-q_i)-\sum_{i\in e}q_i\prod_{j\in e,\,j\neq i}(1-q_j).
+    \label{eq:surrogates}
+  \end{equation}
+  With $\Bset$ the background events and $\Sset_k$ the truth $\tau$ objects of region $k$, $\widetilde{\FPR}=|\Bset|^{-1}\sum_{e\in\Bset}\tilde P_e^{(2)}$ and $\tilde\eff_k=|\Sset_k|^{-1}\sum_{i\in\Sset_k}q_i$. These quantities are used only for optimisation and never to certify a constraint.
+\end{description}
+
+\paragraph{Why recalibration matters.}
+With a frozen proxy threshold, the optimiser could increase every score through the output bias, improving the soft objective without improving the deployed ranking; the fake rate at that frozen threshold grew several-fold. Recomputing the proxy threshold from background ranks makes it move with a common score shift and removes this artificial gain. This addresses score translation; it does not imply that a fixed-temperature sigmoid surrogate is invariant to every monotone score transformation. Annealing then trades broad early gradient coverage for a sharper late approximation.
+
+\subsection{Primal--dual training}
+The Lagrangian is
+\begin{equation}
+  \mathcal{L}(\theta,\lambda)=-\tilde J(\theta)+\lambda_{\mathrm{FPR}}\frac{\widetilde{\FPR}(\theta)-0.005}{0.005}+\sum_{k\in\Kset_C}\lambda_k\big(r_k-\tilde\eff_k(\theta)\big),
+\end{equation}
+where $\tilde J$ replaces each hard efficiency by its surrogate. The fake-rate violation is expressed relative to its target so that the fake-rate and region terms have comparable scales. Without this normalisation, a one-per-mille excess in fake rate would be numerically invisible next to an efficiency deficit of the same physical importance. The two updates alternate. The network parameters take Adam steps on $\mathcal{L}$. The multipliers follow projected dual ascent on \emph{hard} violations $g_j$,
+\begin{equation}
+  \lambda_j\leftarrow\big[\lambda_j+\eta_j\,g_j\big]_{[0,\lambda_{\max}]},\qquad\lambda_{\max}=25,\quad\eta_{\mathrm{FPR}}=1,\quad\eta_k=50 .
+\end{equation}
+All multipliers start at zero and become active only after a measured violation. The region rates are larger because region violations are numerically small: they correspond to a handful of signal objects. The hard violations are measured once per epoch on a held-out \emph{constraint subset} of the training events, with two-fold cross-fitting. This keeps optimistic in-sample calibration from driving the multipliers: in earlier stages the in-sample measurement reported comfortable margins while the validation margins were already negative, and every $\lambda_k$ stayed at zero throughout training. The division of labour is strict: differentiable quantities provide gradients, and exact deployable decisions determine whether a constraint is satisfied.
+
+\subsection{Protocol and leakage protection}
+Constrained training is a fine-tuning stage. It starts from the best weighted-BCE checkpoint of the same input representation and runs for $20$ epochs at learning rate $10^{-4}$, with batches of $2048$ complete events. The training events are split into two disjoint, stratified subsets: a primal subset ($70\%$) for the network update and a constraint subset ($30\%$) used only for the dual update. Complete events stay together, because the event fake rate cannot be estimated from shuffled objects. Checkpoint selection uses validation cross-fitting (\cref{app:calibration}). The held-out validation fake rate measured this way is typically $0.35$--$0.40\%$, while the in-sample value is $0.499\%$. After the best epoch is chosen, one deployment threshold is calibrated on the full validation set with the confidence-safe target. The test set is never used for training, calibration or selection.
+
+\subsection{Uncertainty-aware feasibility}
+Feasibility based on point estimates was fragile in both directions. A checkpoint could be accepted because a window of 90 objects fluctuated upward, or rejected because it fluctuated downward. Every constraint is therefore evaluated with its event-clustered lower bound $L_r$ (\cref{app:calibration}). The first fully certified rule required $L_r\geq m_k$ in every region and a certified fake-rate bound below target. It was too strict: certifying a $0.5\%$ rate at $95\%$ confidence requires operating near $0.42\%$, and certifying a non-negative advantage in the saturated region requires an observed advantage of about $+0.8$ points where the true value is compatible with zero. Even the initial model was infeasible, and two of three seeds returned their initialisation. The corrected rule keeps the uncertainty machinery but
+(i)~applies the fake-rate test to the measured cross-fitted rate and records the Clopper--Pearson bound as a diagnostic (the budget itself is protected by the confidence-safe deployment target), and
+(ii)~includes the tolerance in the certified guards, $L_r\geq m_k-\delta_{\mathrm{phys}}$ with $\delta_{\mathrm{phys}}=0.005$, so a saturated region must be statistically compatible with non-inferiority rather than certifiably superior.
+Among feasible epochs, the one with the largest cross-fitted hard objective is selected. If no epoch is feasible, the one with the smallest certified violation is kept.
+
+\subsection{Applying the loss to other inputs and to the CNNs}
+The objective, the constraints, the surrogates and the dual updates act only on network scores and measured efficiencies, and no term refers to the input variables. A different input representation is therefore a configuration change, not a code change. Three surrounding components are matched to the representation and are prepared for each one:
+\begin{itemize}
+  \item \textbf{Initialisation and reference guard.} Fine-tuning starts from the best weighted-BCE model of the \emph{same} inputs: inverse frequency for \CT\ and \SUM+\Ffeat, and $p=-1$ for \CP+\CT\ and \CT+\Ffeat. The reference floor~\eqref{eq:floor} is defined relative to this starting point, so a checkpoint trained on other inputs cannot be reused.
+  \item \textbf{Temperature scale.} $T$ acts on the score scale, and different inputs produce score distributions of different width near the threshold. The fraction of objects inside the effective gradient band $|z_i-t_{\mathrm{proxy}}|\lesssim3T$ is recorded per region before training. The annealing endpoints are changed only if this coverage differs strongly from the reference.
+  \item \textbf{What transfers unchanged.} Across the MLP inputs, the regions, weights and tolerances ($m_k$, $\rho_k$, $\delta_{\mathrm{phys}}$) are physics choices in efficiency units. The dual rates and the fake-rate normalisation act on rate scales. The cross-fitting, the confidence-safe calibration and the selection protocol are independent of the inputs.
+\end{itemize}
+The same recipe is used for the convolutional models, where ``FT'' denotes a constrained fine-tune of an IF or BCE model (\cref{tab:naming}). Their weak end was saturation rather than the turn-on, so for them the objective also rewards $[60,100)\GeV$, with weights $w=(0.30,0.30,0.25,0.15)$, and the saturated region is guarded as two regions, $[60,100)$ and $[100,120)\GeV$, each allowed at most $0.5$ points below the starting model. This is the only change of regions or weights between input representations.
+
+\subsection{Discarded variants}
+\begin{description}[leftmargin=0pt,itemsep=2pt]
+  \item[Frozen proxy threshold with a counterweight.] Keeping $t_{\mathrm{proxy}}$ fixed and relying on $\lambda_{\mathrm{FPR}}$ (initialised by balancing gradient norms) to suppress score inflation only moved the equilibrium: each seed settled at a different inflation level. The rank-calibrated threshold removes the direction from the loss itself.
+  \item[Tail-ranking objective.] A pairwise logistic loss compared truth-$\tau$ logits with the second-highest logits of the top $5\%$ of background events, selected by rank. It is shift invariant and gives full gradient to signal far below the boundary. However, it raised the low-energy gain faster than the saturation constraints could respond, and checkpoint selection fell back to early epochs.
+  \item[Hard-negative memory bank.] A buffer of median-centred background offsets from earlier batches was meant to enlarge the ranking tail. The stale offsets no longer matched the current network, and all seeds selected their initialisation.
+\end{description}
+
+\subsection{Requirements for a trigger loss}
+\label{app:loss_requirements}
+These requirements emerged from failed variants as well as successful fine-tuning. Weighted BCE captured much of the available improvement; the custom objective chiefly made energy-dependent trade-offs explicit. The lessons concern the complete loss, calibration and selection procedure, not a claim that one surrogate is universally optimal.
+\begin{enumerate}[label=(\arabic*),itemsep=3pt]
+  \item \textbf{Respect the calibrated ranking.}
+  After threshold recalibration, a common strictly increasing transformation of the scores preserves their ranking and hence the hard decision at a fixed rate, apart from numerical or tie effects. A surrogate should not reward changes that merely move all scores together. With a frozen proxy threshold, output-bias inflation increased the training fake rate from $0.5\%$ to above $3\%$ without improving separation. A minimal diagnostic is to add a constant to every logit and verify that the objective does not improve. Recomputing the background-quantile threshold removes this translation shortcut; it does not make a fixed-temperature sigmoid invariant to arbitrary monotone transformations.
+
+  \item \textbf{Make regional trade-offs explicit.}
+  Equal object weights are not equal energy-region weights: the falling spectrum gives abundant soft taus more influence. A region absent from both reward and protection can pay for gains elsewhere. In the \SUM+\Ffeat\ fine-tune, improvements at $32$--$60\GeV$ accompanied a $0.69$-point loss at $10$--$25\GeV$, which had neither role. Every scientifically relevant region therefore needs an explicit reward, floor or deliberately accepted trade-off. Adaptive constraint multipliers cannot protect a region omitted from the formulation.
+
+  \item \textbf{Inspect gradient coverage, not just the loss value.}
+  A narrow sigmoid surrogate can be accurate near the threshold yet give almost no gradient to missed taus far below it. In one examined setting, their gradient magnitude was about $1/4600$ of that at the boundary. Conversely, the tail-ranking variant reached distant signal but changed the efficiency profile faster than the protection mechanism could react. Inspect gradient magnitude against score and energy, including missed signal; temperature annealing balances early reach against late decision fidelity.
+
+  \item \textbf{Optimise softly, assess hard decisions out of sample.}
+  Differentiability is a training device, not evidence of constraint satisfaction. Threshold calibration and violation measurement must use separate event subsets through cross-fitting, and measurements must use the exact two-object trigger. Earlier in-sample checks reported safe regional margins while held-out margins were negative, leaving all regional multipliers inactive. Held-out constraint events restored meaningful feedback; validation remained separate for checkpoint selection.
+
+  \item \textbf{Match tolerances to statistical resolution.}
+  Sparse windows cannot support arbitrarily fine protection thresholds: one accepted tau among $90$--$250$ objects changes efficiency by roughly $0.4$--$1.1$ percentage points. The first fully certified rule rejected even the initial model; pooled or multiscale guards and uncertainty-aware tolerances made selection usable. Compute uncertainty at the level of the claim, preserving event clustering and paired comparisons where appropriate. A small global gain across seeds and an equally sized fluctuation in one sparse bin are not equally strong evidence.
+\end{enumerate}

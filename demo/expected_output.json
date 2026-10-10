@@ -1,0 +1,26 @@
+{
+  "checks": [
+    "all finite TOBs were retained",
+    "six TOBs produced fifteen unordered pairs",
+    "the final 4357-parameter architecture completed inference",
+    "pair scores were reduced by maximum within each event",
+    "the no-pair event received negative infinity and failed",
+    "the neural and deterministic branches were combined by event-level OR"
+  ],
+  "configuration": "configs/pair_final_all_finite_equal_event/config.json",
+  "demo_or_decisions": {
+    "101": true,
+    "202": false,
+    "303": false
+  },
+  "event_count": 3,
+  "event_pair_counts": {
+    "101": 15,
+    "202": 3,
+    "303": 0
+  },
+  "finite_tob_count": 10,
+  "model_parameters": 4357,
+  "pair_count": 18,
+  "status": "PASS"
+}

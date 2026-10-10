@@ -1,0 +1,18 @@
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Model & 10--25 & 25--40 & 40--60 & 60--100 & 100--120 & Global & Params \\
+\midrule
+E1+V4+\Ffeat, BCE+FT & 17.45 & 66.39 & 90.54 & \textcolor{cbred}{96.75} & \textcolor{cbred}{98.28} & 69.61$\pm$0.29 & 9.2K$^\dagger$ \\
+E1+V4+\Ffeat, BCE & 19.05 & 66.91 & 89.49 & \textcolor{cbred}{95.28} & \textcolor{cbred}{96.89} & 69.53$\pm$0.23 & 9.2K$^\dagger$ \\
+E1+V4+\Ffeat, IF & 18.51 & 64.73 & 89.49 & \textcolor{cbred}{96.49} & \textcolor{cbred}{98.08} & 69.15$\pm$0.14 & 9.2K$^\dagger$ \\
+E3+V2+\Ffeat, FT & 16.93 & 64.31 & 90.08 & 97.56 & \textcolor{cbred}{98.89} & 69.08$\pm$0.35 & 5.4K \\
+E1+V4+\Ffeat, FT & 17.16 & 64.78 & 89.83 & 96.99 & \textcolor{cbred}{98.35} & 69.05$\pm$0.16 & 9.2K$^\dagger$ \\
+E3+V2+\Ffeat, IF & 17.73 & 63.81 & 89.78 & 97.43 & \textcolor{cbred}{98.84} & 69.05$\pm$0.25 & 5.4K \\
+E1+V2+\Ffeat, FT & 16.87 & 64.44 & 90.28 & 97.41 & \textcolor{cbred}{98.44} & 69.05$\pm$0.28 & 5.7K \\
+E1+V1+\Ffeat, IF & 17.84 & 64.30 & 89.27 & \textcolor{cbred}{96.79} & \textcolor{cbred}{98.48} & 68.97$\pm$0.30 & 7.4K$^\dagger$ \\
+E1+V2+\Ffeat, IF & 16.65 & 64.40 & 90.29 & 97.36 & \textcolor{cbred}{98.53} & 68.96$\pm$0.12 & 5.7K \\
+E2+V1+\Ffeat, IF & 18.68 & 63.78 & 89.32 & \textcolor{cbred}{96.62} & \textcolor{cbred}{98.16} & 68.96$\pm$0.28 & 7.2K$^\dagger$ \\
+\midrule
+eFEX baseline & 2.28 & 35.85 & 81.60 & 96.89 & 99.34 & 57.37 & --- \\
+\bottomrule
+\end{tabular}

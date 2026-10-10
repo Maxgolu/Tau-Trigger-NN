@@ -1,0 +1,129 @@
+% ============================================================================
+\section{Model Names and Architectures}
+\label{app:arch}
+% ============================================================================
+
+\subsection{How to read a model name}
+\label{app:naming}
+A model name lists its inputs and architecture, then its training objective and classifier (\cref{tab:naming}). Two examples:
+\begin{itemize}
+  \item ``E1+V4+\Ffeat, IF'': an EM2 branch of type E1, a core-tensor backbone of type V4 and the $\Frac$ scalar, joined in the dense head and trained with inverse-frequency weighted BCE. The classifier is NN-only (the default).
+  \item ``MLP, \CT+\Ffeat, FT'': the $[32,16]$ MLP on the 45 core cells plus $\Frac$, pretrained with weighted BCE and then fine-tuned with the constrained objective.
+\end{itemize}
+A V-backbone implicitly consumes \CT; an E-branch implicitly consumes the fine EM2 image. A suffix $+\Ffeat$ adds the engineered scalar, not another image. Flat \CT\ or \SUM\ bypasses convolution and enters the head directly. Unless OR is specified, the classifier is NN-only. Thus E3+V2+\Ffeat, FT means EM2 branch E3, core backbone V2 and Fraction, first trained with IF and then constrained-fine-tuned; it does not mean a power-law run.
+
+\begin{table}[h]
+  \centering
+  \caption{Naming key for inputs, architectures, objectives and classifiers.}
+  \label{tab:naming}
+  \small
+  \begin{tabularx}{\linewidth}{@{}lX@{}}
+    \toprule
+    Name & Meaning \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Inputs}} \\
+    \CT & the 45 raw cell energies of the $5\times3\times3$ core tensor (\cref{app:features}) \\
+    \SUM & 15 per-layer summaries: energy sum, core dominance and sparsity of each of the five layers \\
+    \CP & ``core physics'': BDT score, $\ptTOB$, and $\eta,\phi$ relative to the leading TOB \\
+    \Ffeat & the EM2 compactness $\Frac$ (\cref{eq:frac}) \\
+    \EMtwo & the $12\times12$ EM2 image; read only by an E-branch \\
+    flat \CT\ / \SUM & the cells or summaries passed directly to the dense head, without convolution \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Architectures}} \\
+    MLP & fully connected network $d\to32\to16\to1$ \\
+    V1 & core-tensor layer mixing: $1\times1$ convolution across five input layers, 12 filters \\
+    V2 & core-tensor spatial processing: $2\times2$ convolution across five layers, 12 filters \\
+    V3 & serial core backbone: V1 followed by a $2\times2$ convolution on its feature maps \\
+    V4 & parallel core backbone: V1 and V2 outputs concatenated (\cref{app:vbackbones}) \\
+    E1 & EM2: $3\times3$ convolution, 4 filters, then $2\times2$ max pooling \\
+    E2 & EM2: $3\times3$ convolution, 8 filters, pooling, then a second $3\times3$ convolution \\
+    E3 & EM2: as E2, but stride 2 replaces first-stage pooling (\cref{app:ebranches}) \\
+    E$x$+V$y$ & dual-branch model: E-branch and V-backbone concatenated in one head \\
+    E$x$ + flat \CT & EM2-only model: an E-branch plus plain core-cell scalars (\cref{app:em2only}) \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Training objective}} \\
+    BCE & plain binary cross-entropy \\
+    IF & inverse-frequency BCE: signal weights from empirical training-bin counts, with clipping (\cref{app:weighting}) \\
+    $p$ & power-law BCE: weights proportional to clamped $t^{-p}$; $p<0$ emphasises energetic signal. Not the IF formula \\
+    FT & constrained fine-tuning of a pretrained model; an unqualified CNN FT starts from IF \\
+    BCE+FT / $p{=}-1$+FT & FT after plain BCE / power-law BCE with $p=-1$, respectively \\
+    rank control & earlier rank-calibrated soft-objective FT control, not the pairwise tail-ranking variant \\
+    \midrule
+    \multicolumn{2}{@{}l}{\emph{Classifier}} \\
+    NN-only & default: an object is accepted when $s_{e,i}\geq t$ \\
+    OR & TOB--NN OR classifier~\eqref{eq:or} \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Common interface}
+All models share one interface: \code{forward} returns a probability and \code{forward\_logits} returns the pre-sigmoid score. Training, calibration and constrained fine-tuning therefore treat every model in the same way. A configuration without a \code{model} block reproduces the MLP exactly. Setting \code{model.name=tensor\_cnn} builds a convolutional model from a list of branches. Each branch names a registry feature and a shape, and folds that feature's columns back into a (channels, height, width) image in the same order as the registry. Kernel sizes, channel counts, strides, pooling, extra branches and skip connections are all configuration fields, so a new architecture is a new configuration rather than new code.
+
+\subsection{MLP}
+The MLP is $d\to32\to16\to1$ with ReLU activations and a sigmoid output, and has $32d+577$ parameters. For example, it has $2{,}049$ parameters on \CT+\Ffeat\ ($d=46$), $2{,}145$ on \CP+\CT\ and $1{,}089$ on \SUM+\Ffeat. \citet{kernan2026} also swept the hidden layers $[48]$, $[32,32]$, $[64,32]$, $[32,16,8]$, $[64,32,16]$, $[64,32,16,8]$, $[64,32,16,8,8]$ and $[512,256,128,64,32]$ over seven feature sets, and found no systematic change in the turn-on curve. The largest network was the weakest on the largest input.
+
+\subsection{Core-tensor backbones V1--V4}
+\label{app:vbackbones}
+The core tensor is a stack of five $3\times3$ images, one per calorimeter layer (\cref{fig:cnn_blocks}a). A convolution slides one small set of weights, the \emph{kernel}, over the image and applies the same weights at every position. This builds in two assumptions an MLP must learn from data: nearby cells are related, and the same pattern means the same thing wherever it appears. On a $3\times3$ grid a $3\times3$ kernel fits in only one position, so it is no different from a dense layer. Only two kernel shapes give real weight sharing:
+\begin{itemize}
+  \item \textbf{V1, layer mixing ($1\times1\times5$).} At each of the nine cells, the kernel reads the five energies of that cell, one per layer from EM0 to HAD, and forms a weighted sum. Twelve such filters give twelve numbers per cell. Each filter is a learned description of the \emph{longitudinal profile}, i.e.\ how the energy is shared between the layers, and the same filter is applied at every cell. The output is $12\times3\times3=108$ values from $72$ weights.
+  \item \textbf{V2, spatial ($2\times2\times5$).} The kernel reads a $2\times2$ block of cells across all five layers ($20$ energies) and fits at four positions. Its twelve filters learn local spatial patterns, such as ``energy in the centre but not in its neighbour'', in all layers at once. The output is $12\times2\times2=48$ values from $252$ weights.
+  \item \textbf{V3, serial.} V1 first converts each cell into twelve profile values. A $2\times2$ convolution over these twelve channels then looks for spatial patterns in the learned profiles. The output is $48$ values.
+  \item \textbf{V4, parallel.} V1 and V2 run side by side on the same input, and their outputs are concatenated ($108+48=156$ values). Each mechanism can specialise without passing through the other.
+\end{itemize}
+The window is centred on the TOB seed, so the absolute position of a pattern is informative: a large central cell means something different from a large corner cell. We therefore never apply global pooling; the feature maps are flattened and fed to the dense head together with any scalar inputs.
+
+\subsection{EM2 branches E1--E3}
+\label{app:ebranches}
+The $12\times12$ EM2 image is large enough for standard convolution blocks (\cref{fig:cnn_blocks}b).
+\begin{itemize}
+  \item \textbf{E1, single block.} A $3\times3$ kernel slides over the image with stride~1, which gives $10\times10=100$ positions. Four filters with $9$ weights and a bias each ($40$ parameters) act as four learned templates, such as an isolated peak or an energy gradient. Their responses form four $10\times10$ maps. A $2\times2$ max pooling keeps only the strongest response in each $2\times2$ neighbourhood, so the maps shrink to $4\times5\times5=100$ values. The pooling means ``this template fired this strongly somewhere here''. Max is used rather than average because it preserves sharp energy peaks.
+  \item \textbf{E2, two blocks.} The same block with eight filters ($8\times5\times5$) is followed by a second $3\times3$ convolution on the pooled maps ($8\times3\times3=72$ values). Each pooled value already summarises about $4\times4$ cells, so a second-layer unit sees about $8\times8$ cells of the original image. It can therefore learn \emph{relations} between patterns, for example two separated clusters or a core with sideways leakage.
+  \item \textbf{E3, strided.} As E2, but the first convolution moves two cells at a time (stride~2). It thus produces $8\times5\times5$ directly, without pooling. The network then learns which information the down-sampling keeps, instead of relying on the fixed max rule~\cite{kim2023hotspots}.
+\end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{\input{figures/fig_cnn_blocks}}
+  \caption{Convolutional building blocks. (a) The core-tensor backbones: V1 applies a $1\times1\times5$ kernel (red: one cell through all five layers) at nine positions; V2 applies a $2\times2\times5$ kernel (orange dashed) at four positions; V4 runs both and concatenates their flattened maps before the dense head. (b) The EM2 branches: E1 (one $3\times3$ convolution with four filters and $2\times2$ max pooling) and E3 (a stride-2 convolution followed by a second convolution).}
+  \label{fig:cnn_blocks}
+\end{figure}
+
+\subsection{Engineered normalisation beside a learned EM2 branch}
+\label{app:fraction_complementarity}
+The question was whether an E-branch subsumes $\Frac$, not whether the scalar introduces an independent measurement. Its numerator is an all-ones $3\times3$ filter followed by a maximum over windows, so much of its structure resembles convolution and pooling. If the learned branch recovered the full operation, explicitly supplying the scalar would be redundant. The corresponding ablation is reported in \cref{app:analysis_representation}. A plausible explanation is the final division by the total EM2 energy: this global normalisation makes the ratio invariant to a common energy rescaling, whereas a compact local convolution--pooling stack does not readily synthesise it. The scalar supplies that operation directly and leaves the branch free to learn complementary local patterns. Thus, the ablation establishes a practical benefit for the tested networks, not information absent from the original image or an impossibility for larger networks.
+
+\subsection{Dual-branch and EM2-only models}
+\label{app:em2only}
+A dual-branch model E$x$+V$y$ feeds the core tensor to a V-backbone and the EM2 image to an E-branch. It concatenates both flattened outputs, optionally together with $\Frac$, into one $[32,16]$ head. The EM2-only model removes the V-backbone. The 45 core cells (flat \CT) or the 15 summaries (flat \SUM) enter the head as plain scalars next to the E-branch output. This keeps the longitudinal information of the core tensor, which a dense layer reads well, and removes the shared-weight convolution on the coarse $3\times3$ window. The motivation was twofold: the EM2 image seemed to carry most of the discriminating information, and the smaller model fits the hardware budget better (\cref{tab:params}).
+
+Exact model sizes are collected in \cref{tab:params}; \cref{app:analysis_representation} measures the performance cost of replacing the V-backbone by flat \CT\ or \SUM. ``EM2-only'' therefore describes the sole \emph{convolutional} branch: it does not mean that the model discards the other layers. The experiment separates the value of longitudinal measurements from the cost of processing them with convolutions.
+
+\subsection{Hardware scope}
+\label{app:hardware_scope}
+The indicative specification allowed about $4{,}000$ 8-bit weights and restricted available inputs and operations. These requirements changed during the project: an early 49-input design was later restricted to features derived from the $3\times3$ layers~\cite{kernan2026}. We therefore report candidates at several sizes rather than claim one fixed deployment optimum: roughly $2$k parameters for an MLP, $4$--$5$k for EM2-only convolutional models and $9$k for dual-branch models. Trainable counts include BatchNorm parameters, which can be folded into the convolutions at inference. Counts describe model complexity, not measured FPGA latency or resource use; quantisation, operation support and input availability must also be validated before deployment.
+
+\subsection{Input scaling and stability}
+The raw cell energies span about five orders of magnitude. We first compressed the convolutional inputs logarithmically ($E\mapsto\log(1+E)$, then standardisation), reasoning that per-column standardisation gives every position its own scale and could defeat weight sharing. A controlled test refuted this. The flat MLP retrained on the compressed input lost $3.8$ points of global efficiency relative to the same MLP on standardised input, and $8.3$ points in the $25$--$40\GeV$ band. The CNNs were far more robust (about $-0.9$ points), presumably because BatchNorm re-centres every channel. The amplitude scale is therefore discriminating information, not a nuisance, and all models use per-column standardised energies. A plain-ReLU CNN collapsed to a constant output within the first epoch on the full, imbalanced data: the first background-dominated updates made all pre-activations negative, and the dead units never recovered. The \code{conv}$\to$BatchNorm$\to$LeakyReLU stack prevents this. BatchNorm folds into the convolution at inference, so it adds nothing to the deployed cost.
+
+\subsection{Parameter counts}
+\begin{table}[h]
+  \centering
+  \caption{Trainable parameters, including BatchNorm (which folds into the convolutions at inference). Names: \cref{tab:naming}. The head is always $[32,16]$. ``$+$\Ffeat'' adds the $\Frac$ scalar to the head input.}
+  \label{tab:params}
+  \small
+  \begin{tabular}{@{}lr@{\qquad}lr@{\qquad}lr@{}}
+    \toprule
+    Model & Params & Model & Params & Model & Params \\
+    \midrule
+    MLP, \CT            & 2{,}017 & V1 (\CT)           & 4{,}129 & E1+V1+\Ffeat & 7{,}409 \\
+    MLP, \CT+\Ffeat     & 2{,}049 & V2 (\CT)           & 2{,}389 & E1+V2+\Ffeat & 5{,}669 \\
+    MLP, \CP+\CT        & 2{,}145 & V3 (\CT)           & 2{,}821 & E1+V4+\Ffeat & 9{,}221 \\
+    MLP, \SUM+\Ffeat    & 1{,}089 & V4 (\CT)           & 5{,}941 & E2/E3+V1+\Ffeat & 7{,}161 \\
+    E1, flat \CT+\Ffeat & 5{,}297 & V2+\Ffeat          & 2{,}421 & E2/E3+V2+\Ffeat & 5{,}421 \\
+    E2/E3, flat \CT+\Ffeat & 5{,}049 & V4+\Ffeat       & 5{,}973 & E2/E3+V4+\Ffeat & 8{,}973 \\
+    E2/E3, \SUM+\Ffeat  & 4{,}089 & E1, \SUM+\Ffeat    & 4{,}337 &              &        \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+The dense head holds most of the parameters ($82$--$98\%$ in the dual-branch models). Pruning it and quantisation-aware training are therefore the natural first steps towards the FPGA budget.

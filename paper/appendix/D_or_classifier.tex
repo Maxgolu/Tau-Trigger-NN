@@ -1,0 +1,43 @@
+% ============================================================================
+\section{The TOB--NN OR Classifier}
+\label{app:or}
+% ============================================================================
+
+\subsection{From a mixture of experts to a logical OR}
+With plain BCE and $\ptTOB$ among the inputs, the learned turn-on curve often resembled the TOB baseline from below. The network learned most of the energy dependence but not enough shape information to beat the baseline at high energy. Our first remedy was a two-expert model: an energy expert with inputs such as $\ptTOB$, and a shape expert with $\Frac$, widths and angular variables. The two were combined as $s_{\mathrm{mix}}=\alpha s_{\mathrm{energy}}+(1-\alpha)s_{\mathrm{shape}}$, with $\alpha$ and the threshold chosen on validation. Preliminary runs gave no meaningful gain, and the energy expert only relearned a rule that the eFEX already implements exactly. The OR classifier~\eqref{eq:or} keeps this rule deterministic and gives the network the complementary task.
+
+\subsection{Joint calibration}
+Given a TOB budget $b$, the comparator threshold $C_b$ is set so that the TOB branch alone fires in at most a fraction $b$ of background events. The NN threshold $t_b$ is then calibrated so that the complete OR fires in at most $\FPRtarget$. Both steps operate on event decisions: an event containing one TOB-accepted object and one distinct NN-accepted object must count as accepted, even when neither branch alone would fire. The budget is selected separately for each model on validation, not assigned during training.
+
+\subsection{Per-epoch selection procedure}
+At the end of every training epoch:
+\begin{enumerate}
+  \item the network is trained with (weighted) BCE; the OR rule does not enter the gradient;
+  \item validation scores are predicted;
+  \item for every candidate $b\in\mathcal{B}=\{0,0.0005,\dots,0.005\}$, the pair $(C_b,t_b)$ is calibrated with two-fold event cross-fitting inside the validation set (\cref{app:calibration});
+  \item candidates that exceed the $0.5\%$ event fake rate or violate a protection guard are discarded;
+  \item the feasible candidate with the largest objective $J(b)$~\eqref{eq:or_objective} is selected; when two objectives differ by at most $0.002$, the one with the safer worst-window margin is preferred;
+  \item epochs are compared with the same objective.
+\end{enumerate}
+The minimum-BCE checkpoint is kept as a reference. No budget, threshold or epoch is chosen on test data. The procedure is repeated independently for every feature set, seed and checkpoint, because the score distribution of the network and its overlap with the TOB branch change with the inputs.
+
+\subsection{Objective}
+The target is the mean efficiency advantage over the region of interest,
+\begin{equation}
+  J_{\mathrm{cont}}(b)=\frac{1}{100-25}\int_{25}^{100}\big[\eff_{\mathrm{OR}}(p;b)-\effTOB(p)\big]\,dp .
+\end{equation}
+It is estimated over $5\GeV$ windows spanning $25$--$100\GeV$:
+\begin{equation}
+  J(b)=|\Kset|^{-1}\sum_{k\in\Kset}\big[\hat\eff_{\mathrm{OR},k}(b)-\hat\eff^{\mathrm{TOB}}_k\big].
+  \label{eq:or_objective}
+\end{equation} Equal window weights state the physics preference directly: a gain in a sparsely populated high-energy window counts as much as one near the threshold.
+
+\subsection{Protection guards}
+\begin{description}[leftmargin=0pt,itemsep=2pt]
+  \item[Per window.] The original rule required $\hat\Delta_k\geq-0.005$ in every $5\GeV$ window up to $\SI{120}{GeV}$. It proved too sensitive to fluctuations: saturated validation windows contain only $90$--$250$ truth $\tau$ objects, so one object moves the efficiency by $0.4$--$1.1$ points, and a candidate could be accepted or rejected because of a single object.
+  \item[Pooled saturation.] The $5\GeV$ guards are kept below $\SI{60}{GeV}$, and all guards above are replaced by one pooled region with $\hat\Delta_{60:120}\geq-0.005$. Pooling increases the sample, but a local deficit can be averaged away.
+  \item[Multiscale saturation.] The fine guards are kept below $\SI{60}{GeV}$. The saturation range is tested on the overlapping regions $[60,90)$, $[70,100)$, $[80,110)$, $[90,120)$ and the full $[60,120)$, each with the event-clustered lower bound $L_r=\hat\Delta_r-z\hat\sigma_r\geq-\delta_{\mathrm{phys}}$ ($z=1$, $\delta_{\mathrm{phys}}=0.005$). The overlapping regions detect a persistent local loss that pooling would hide, and they are more stable than $5\GeV$ windows. A tolerance of $\delta_{\mathrm{phys}}=0$ was needlessly strict, because it demanded a statistically positive gain even where both classifiers are already close to full efficiency.
+\end{description}
+
+\subsection{Interpreting the selected budget}
+A small $b^\star$ leaves more of the background budget to decisions introduced by the network, and usually indicates a larger independent contribution from the NN. A large $b^\star$ indicates stronger reliance on the comparator. This reading is useful but not absolute, because $b^\star$ also depends on score calibration, seed fluctuations and the overlap of the two branches. The budget changes the final decision rule, whereas signal weighting (\cref{app:weighting}) changes the learned score. The two are separate mechanisms and were studied separately.

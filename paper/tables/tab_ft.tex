@@ -1,0 +1,11 @@
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Model & 10--25 & 25--40 & 40--60 & 60--100 & 100--120 & Global & Params \\
+\midrule
+MLP, \CT+\Ffeat, $p{=}-1$ & 12.31 & 62.68 & 90.44 & 97.90 & \textcolor{cbred}{99.33} & 67.81$\pm$0.35 & 2.0K \\
+MLP, \CT+\Ffeat, $p{=}-1$+FT & 13.73 & 63.84 & 90.50 & 97.52 & \textcolor{cbred}{99.01} & 68.34$\pm$0.42 & 2.0K \\
+\addlinespace[2pt]
+E1+V4+\Ffeat, BCE & 19.05 & 66.91 & 89.49 & \textcolor{cbred}{95.28} & \textcolor{cbred}{96.89} & 69.53$\pm$0.23 & 9.2K \\
+E1+V4+\Ffeat, BCE+FT & 17.45 & 66.39 & 90.54 & \textcolor{cbred}{96.75} & \textcolor{cbred}{98.28} & 69.61$\pm$0.29 & 9.2K \\
+\bottomrule
+\end{tabular}

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import os
 import random
 from pathlib import Path
 
@@ -12,6 +14,8 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 try:
     from .pair_models import build_pair_model
@@ -52,6 +56,7 @@ def prepare_training_arrays(
     target="binary",
     member_width=None,
     high_resolution_widths=None,
+    frozen_normalizer=None,
 ):
     """Load pair inputs and fit normalization using this training file only."""
     with np.load(path, allow_pickle=False) as source:
@@ -119,12 +124,22 @@ def prepare_training_arrays(
                 raise ValueError(
                     f"context must have shape (pairs, {context_width})"
                 )
+            image_shape = (12, 12) if image_channels == 1 else (2, 12, 12)
             if image_channels == 0:
                 image_mean = np.empty((0,), dtype=np.float64)
                 image_scale = np.empty((0,), dtype=np.float64)
                 normalized_images = images.astype(np.float32)
+            elif frozen_normalizer is not None:
+                image_mean = np.asarray(
+                    frozen_normalizer["images_mean"], dtype=np.float64
+                )
+                image_scale = np.asarray(
+                    frozen_normalizer["images_scale"], dtype=np.float64
+                )
+                if image_mean.shape != image_shape or image_scale.shape != image_shape:
+                    raise ValueError("frozen image normalizer shape disagrees with inputs")
+                normalized_images = transform_zscore(images, image_mean, image_scale)
             else:
-                image_shape = (12, 12) if image_channels == 1 else (2, 12, 12)
                 image_mean, image_scale = fit_zscore(
                     images.reshape((-1,) + image_shape),
                     reject_zero_scale=True,
@@ -132,14 +147,40 @@ def prepare_training_arrays(
                 normalized_images = transform_zscore(
                     images, image_mean, image_scale
                 )
-            scalar_mean, scalar_scale = fit_zscore(
-                scalars.reshape(-1, scalar_width),
-                reject_zero_scale=True,
-            )
+            if frozen_normalizer is None:
+                scalar_mean, scalar_scale = fit_zscore(
+                    scalars.reshape(-1, scalar_width),
+                    reject_zero_scale=True,
+                )
+            else:
+                scalar_mean = np.asarray(
+                    frozen_normalizer["scalars_mean"], dtype=np.float64
+                )
+                scalar_scale = np.asarray(
+                    frozen_normalizer["scalars_scale"], dtype=np.float64
+                )
+                if scalar_mean.shape != (scalar_width,) or scalar_scale.shape != (
+                    scalar_width,
+                ):
+                    raise ValueError("frozen scalar normalizer shape disagrees with inputs")
             if context_width == 0:
                 context_mean = np.empty((0,), dtype=np.float64)
                 context_scale = np.empty((0,), dtype=np.float64)
                 normalized_context = context.astype(np.float32)
+            elif frozen_normalizer is not None:
+                context_mean = np.asarray(
+                    frozen_normalizer["context_mean"], dtype=np.float64
+                )
+                context_scale = np.asarray(
+                    frozen_normalizer["context_scale"], dtype=np.float64
+                )
+                if context_mean.shape != (context_width,) or context_scale.shape != (
+                    context_width,
+                ):
+                    raise ValueError("frozen context normalizer shape disagrees with inputs")
+                normalized_context = transform_zscore(
+                    context, context_mean, context_scale
+                )
             else:
                 context_mean, context_scale = fit_zscore(
                     context,
@@ -167,6 +208,46 @@ def prepare_training_arrays(
     if not all(np.isfinite(values).all() for values in arrays):
         raise ValueError("model inputs must be finite")
     return arrays, labels, normalizer
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def load_frozen_normalizer(config):
+    """Load and authenticate the parent moments used by the final model."""
+    normalization = config.get("normalization")
+    if normalization is None:
+        return None
+    if normalization.get("mode") != "frozen_parent_files":
+        raise ValueError("normalization mode must be frozen_parent_files")
+
+    def bound_path(name):
+        binding = normalization.get(name)
+        if not isinstance(binding, dict) or set(binding) != {"path", "sha256"}:
+            raise ValueError(f"normalization binding {name} requires path and sha256")
+        path = Path(binding["path"])
+        if not path.is_file() or _sha256(path) != binding["sha256"]:
+            raise ValueError(f"normalization binding failed: {name}")
+        return path
+
+    parent = json.loads(bound_path("parent_normalizer").read_text(encoding="utf-8"))
+    absolute_mean = np.load(bound_path("absolute_mean"), allow_pickle=False)
+    absolute_scale = np.load(bound_path("absolute_scale"), allow_pickle=False)
+    normalized_mean = np.load(bound_path("normalized_mean"), allow_pickle=False)
+    normalized_scale = np.load(bound_path("normalized_scale"), allow_pickle=False)
+    return {
+        "images_mean": np.stack((absolute_mean, normalized_mean)),
+        "images_scale": np.stack((absolute_scale, normalized_scale)),
+        "scalars_mean": np.asarray(parent["scalar_mean"], dtype=np.float64),
+        "scalars_scale": np.asarray(parent["scalar_scale"], dtype=np.float64),
+        "context_mean": np.asarray(parent["context_mean"], dtype=np.float64),
+        "context_scale": np.asarray(parent["context_scale"], dtype=np.float64),
+    }
 
 
 def _positive_mask(labels, target):
@@ -223,6 +304,32 @@ def _logits(model, batch, input_count):
     return model(*inputs) if len(inputs) > 1 else model(inputs[0])
 
 
+def equal_event_loss(per_pair, event_ids):
+    """Return the mean of complete within-event pair-loss means."""
+    if per_pair.ndim != 1 or event_ids.ndim != 1 or per_pair.shape != event_ids.shape:
+        raise ValueError("pair losses and event identifiers must be aligned vectors")
+    unique_events = torch.unique(event_ids, sorted=True)
+    if len(unique_events) == 0:
+        raise ValueError("equal-event loss requires at least one event")
+    return torch.stack(
+        [per_pair[event_ids == event_id].mean() for event_id in unique_events]
+    ).mean()
+
+
+def equal_event_batches(event_ids, generator, event_batch_size=256):
+    """Yield indices for shuffled batches without splitting any event."""
+    identifiers = np.asarray(event_ids, dtype=np.int64)
+    if identifiers.ndim != 1:
+        raise ValueError("pair event identifiers must be one-dimensional")
+    if isinstance(event_batch_size, bool) or int(event_batch_size) < 1:
+        raise ValueError("event_batch_size must be positive")
+    unique_events = np.unique(identifiers)
+    order = torch.randperm(len(unique_events), generator=generator).numpy()
+    for start in range(0, len(order), int(event_batch_size)):
+        chosen = unique_events[order[start : start + int(event_batch_size)]]
+        yield np.flatnonzero(np.isin(identifiers, chosen))
+
+
 def _target_and_loss(config):
     loss_config = config.get("loss", {})
     name = loss_config.get("name", "bce")
@@ -239,6 +346,29 @@ def _target_and_loss(config):
             f"target must be {declared_target!r} when loss is {name!r}"
         )
     return target, name
+
+
+def initialize_model_for_training(model, model_config, seed):
+    """Apply an explicitly declared reproducible initialization contract."""
+    initialization = model_config.get("initialization")
+    if initialization is None:
+        return
+    if initialization != "seeded_kaiming_uniform_leaky_relu_0.1":
+        raise ValueError(f"unsupported model initialization: {initialization}")
+    torch.manual_seed(int(seed))
+    for module in model.modules():
+        if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear)):
+            torch.nn.init.kaiming_uniform_(
+                module.weight,
+                a=0.1,
+                mode="fan_in",
+                nonlinearity="leaky_relu",
+            )
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, torch.nn.BatchNorm2d):
+            torch.nn.init.ones_(module.weight)
+            torch.nn.init.zeros_(module.bias)
 
 
 def train_seed(config, pair_data_path, output_dir, seed):
@@ -267,6 +397,7 @@ def train_seed(config, pair_data_path, output_dir, seed):
         target=target,
         member_width=member_width,
         high_resolution_widths=high_resolution_widths,
+        frozen_normalizer=load_frozen_normalizer(config),
     )
     weighting = config.get("loss", {}).get("pair_weighting", "equal")
     weights = training_weights(
@@ -275,20 +406,33 @@ def train_seed(config, pair_data_path, output_dir, seed):
         target=target,
         weighting=weighting,
     )
+    reduction = config.get("loss", {}).get("reduction", "equal_pair")
+    if reduction not in {"equal_pair", "equal_event"}:
+        raise ValueError("loss reduction must be equal_pair or equal_event")
+    pair_event_ids = None
+    if reduction == "equal_event":
+        with np.load(pair_data_path, allow_pickle=False) as source:
+            if "pair_event_ids" not in source:
+                raise KeyError("equal-event training requires pair_event_ids")
+            pair_event_ids = np.asarray(source["pair_event_ids"], dtype=np.int64)
+        if pair_event_ids.ndim != 1 or len(pair_event_ids) != len(labels):
+            raise ValueError("pair_event_ids must contain one identifier per pair")
     model = build_pair_model(model_config)
+    initialize_model_for_training(model, model_config, seed)
 
     tensors = [torch.from_numpy(values) for values in arrays]
     tensors.append(torch.from_numpy(labels))
     tensors.append(torch.from_numpy(weights))
-    dataset = TensorDataset(*tensors)
     generator = torch.Generator().manual_seed(424200 + int(seed))
-    loader = DataLoader(
-        dataset,
-        batch_size=int(config.get("batch_size", 256)),
-        shuffle=True,
-        generator=generator,
-        num_workers=0,
-    )
+    if reduction == "equal_pair":
+        dataset = TensorDataset(*tensors)
+        loader = DataLoader(
+            dataset,
+            batch_size=int(config.get("batch_size", 256)),
+            shuffle=True,
+            generator=generator,
+            num_workers=0,
+        )
 
     optimizer_config = config.get("optimizer", {})
     if optimizer_config.get("name", "adam").lower() != "adam":
@@ -296,6 +440,10 @@ def train_seed(config, pair_data_path, output_dir, seed):
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=float(optimizer_config.get("learning_rate", 0.001)),
+        betas=tuple(float(value) for value in optimizer_config.get("betas", (0.9, 0.999))),
+        eps=float(optimizer_config.get("epsilon", 1e-8)),
+        weight_decay=float(optimizer_config.get("weight_decay", 0.0)),
+        amsgrad=bool(optimizer_config.get("amsgrad", False)),
     )
     run_dir = Path(output_dir) / f"seed_{seed}"
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -312,11 +460,24 @@ def train_seed(config, pair_data_path, output_dir, seed):
         total_loss = 0.0
         unweighted_loss = 0.0
         total_count = 0
-        for batch in loader:
+        batches = (
+            loader
+            if reduction == "equal_pair"
+            else (
+                tuple(tensor[index] for tensor in tensors)
+                + (torch.from_numpy(pair_event_ids[index]),)
+                for index in equal_event_batches(
+                    pair_event_ids,
+                    generator,
+                    int(config.get("event_batch_size", 256)),
+                )
+            )
+        )
+        for batch in batches:
             optimizer.zero_grad(set_to_none=True)
             logits = _logits(model, batch, len(arrays))
-            targets = batch[-2]
-            batch_weights = batch[-1]
+            targets = batch[len(arrays)]
+            batch_weights = batch[len(arrays) + 1]
             if loss_name == "bce":
                 logits = logits.reshape(-1)
                 targets = targets.reshape(-1)
@@ -329,14 +490,23 @@ def train_seed(config, pair_data_path, output_dir, seed):
                 if logits.ndim != 2 or logits.shape[1] != 3:
                     raise ValueError("three-class training requires three output logits")
                 per_pair = F.cross_entropy(logits, targets.reshape(-1), reduction="none")
-            loss = (per_pair * batch_weights.reshape(-1)).mean()
+            weighted = per_pair * batch_weights.reshape(-1)
+            if reduction == "equal_event":
+                batch_event_ids = batch[-1]
+                loss = equal_event_loss(weighted, batch_event_ids)
+                plain_loss = equal_event_loss(per_pair, batch_event_ids)
+                batch_count = len(torch.unique(batch_event_ids))
+            else:
+                loss = weighted.mean()
+                plain_loss = per_pair.mean()
+                batch_count = len(targets)
             if not torch.isfinite(loss):
                 raise RuntimeError("training produced a non-finite loss")
             loss.backward()
             optimizer.step()
-            total_loss += float((per_pair * batch_weights).detach().sum())
-            unweighted_loss += float(per_pair.detach().sum())
-            total_count += len(targets)
+            total_loss += float(loss.detach()) * batch_count
+            unweighted_loss += float(plain_loss.detach()) * batch_count
+            total_count += batch_count
 
         mean_loss = total_loss / total_count
         records.append(
@@ -344,6 +514,7 @@ def train_seed(config, pair_data_path, output_dir, seed):
                 "epoch": epoch,
                 "loss_name": loss_name,
                 "pair_weighting": weighting,
+                "loss_reduction": reduction,
                 "training_objective": mean_loss,
                 "training_unweighted_loss": unweighted_loss / total_count,
                 "training_bce": mean_loss if loss_name == "bce" else "",

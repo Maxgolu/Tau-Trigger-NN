@@ -1,0 +1,22 @@
+% Title emblem: an original "tau on a trigger chip" icon (TikZ, no external image).
+\begin{tikzpicture}[x=1cm,y=1cm,line cap=round]
+  \definecolor{embdark}{HTML}{184F95}
+  \definecolor{embmid}{HTML}{2A78D6}
+  \definecolor{emblight}{HTML}{CDE2FB}
+  % pins on the four sides
+  \foreach \p in {-0.42,-0.14,0.14,0.42} {
+    \draw[embdark, line width=1.3pt] (\p,0.62) -- (\p,0.80);
+    \draw[embdark, line width=1.3pt] (\p,-0.62) -- (\p,-0.80);
+    \draw[embdark, line width=1.3pt] (0.62,\p) -- (0.80,\p);
+    \draw[embdark, line width=1.3pt] (-0.62,\p) -- (-0.80,\p);
+  }
+  % chip body
+  \fill[embdark, rounded corners=3pt] (-0.64,-0.64) rectangle (0.64,0.64);
+  \draw[embmid, line width=0.8pt, rounded corners=2pt] (-0.54,-0.54) rectangle (0.54,0.54);
+  % small calorimeter grid in the corner (3x3 towers)
+  \foreach \i in {0,1,2} \foreach \j in {0,1,2}
+    \fill[emblight!70] (0.20+0.095*\i,-0.47+0.095*\j) rectangle ++(0.075,0.075);
+  \fill[white] (0.295,-0.375) rectangle ++(0.075,0.075);
+  % the tau
+  \node[text=white, font=\fontsize{30}{30}\selectfont\bfseries] at (-0.06,0.07) {$\boldsymbol{\tau}$};
+\end{tikzpicture}

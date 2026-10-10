@@ -1,0 +1,13 @@
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Model & 10--25 & 25--40 & 40--60 & 60--100 & 100--120 & Global & Params \\
+\midrule
+E3+V1+\Ffeat, FT & 15.43 & 63.37 & 90.54 & 97.73 & \textcolor{cbred}{99.15} & 68.61$\pm$0.11 & 7.2K \\
+E3+V2, FT & 15.77 & 63.06 & 89.84 & 97.47 & \textcolor{cbred}{99.01} & 68.44$\pm$0.87 & 5.4K \\
+E3+V4, FT & 15.28 & 62.92 & 90.08 & 97.65 & \textcolor{cbred}{99.07} & 68.35$\pm$0.14 & 8.9K \\
+MLP, \CT+\Ffeat, $p{=}-1$+FT & 13.73 & 63.84 & 90.50 & 97.52 & \textcolor{cbred}{99.01} & 68.34$\pm$0.42 & 2.0K \\
+E3+V3, IF & 14.53 & 61.81 & 90.10 & 97.82 & \textcolor{cbred}{99.24} & 67.98$\pm$0.18 & 5.8K \\
+\midrule
+eFEX baseline & 2.28 & 35.85 & 81.60 & 96.89 & 99.34 & 57.37 & --- \\
+\bottomrule
+\end{tabular}

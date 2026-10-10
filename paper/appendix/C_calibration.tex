@@ -1,0 +1,41 @@
+% ============================================================================
+\section{Event-Level Calibration and Statistical Tools}
+\label{app:calibration}
+% ============================================================================
+
+\subsection{Metrics, baseline and reporting protocol}
+\label{app:metric_protocol}
+The signal efficiency $\eff(\pT)$ is the fraction of truth-matched tau objects accepted at the calibrated threshold, rather than the fraction of signal events firing the trigger. It is reported globally over all test tau objects and in the true-$\pT$ bands $10$--$25$, $25$--$40$, $40$--$60$, $60$--$100$ and $100$--$120\GeV$. The event-level fake rate instead counts firing background events. The baseline accepts an object when $\ptTOB\geq C$ and uses the same two-object event decision as the network. Although this is a hard cut in reconstructed $\ptTOB$, its efficiency versus true $\pT$ turns on gradually because the reconstructed response is shifted and smeared; some high-true-$\pT$ objects still fall below the cut.
+
+For the reported fixed-rate comparisons, the model and baseline thresholds are recalibrated on the same test background at the same target, and both achieved rates are reported. This measures discrimination at a common operating point; it does not test transfer of a frozen threshold. Performance using the validation-calibrated threshold is retained separately for that purpose. Test recalibration does not select features, losses, budgets, architectures or checkpoints. The design goal is non-inferiority above $\SI{25}{GeV}$, earlier saturation and gains across $25$--$100\GeV$, with some loss below $\SI{25}{GeV}$ acceptable. These are goals, not a claim that every reported model satisfies them. Accuracy, ROC-AUC and minimum BCE are not the primary selection criteria.
+
+\subsection{Tie-aware threshold selection}
+Let $\Bset$ be a set of $N$ background events. For the two-object trigger, the \emph{event trigger score} is $u_e=s_{e,(2)}$, the second-highest object score. An event with fewer than two objects can never fire. The procedure is:
+\begin{enumerate}
+  \item Let $v_1>v_2>\dots>v_m$ be the distinct values of $\{u_e\}$, and let $c_j=|\{e:u_e\geq v_j\}|$ be the cumulative counts (all events tied at a value are counted together).
+  \item Let $k_{\max}=\lfloor\FPRtarget N\rfloor$. Return $t^\star=v_{j^\star}$ with $j^\star=\max\{j:c_j\leq k_{\max}\}$. If no such $j$ exists, return the next floating-point value above $v_1$, so that no event fires.
+  \item Report the \emph{achieved} rate $\widehat{\FPR}=|\{e:u_e\geq t^\star\}|/N\leq\FPRtarget$.
+\end{enumerate}
+Because the search runs over distinct values, a group of tied scores is never split: all of its events pass or all fail. A threshold between two scores could claim a fake rate the deployed comparison $s\geq t$ cannot reproduce. Calibration and deployment use the same float64 comparison.
+
+\subsection{Joint calibration of the OR classifier}
+For a TOB budget $b$, the TOB cut $C_b$ is obtained by applying the procedure above to the second-highest $\ptTOB$ with target $b$. Given $C_b$, let $n_e=\sum_i\1[q_{e,i}\geq C_b]$ be the number of objects the TOB branch accepts in event $e$.
+\begin{itemize}
+  \item Events with $n_e\geq2$ fire regardless of the network. They form a fixed base count $N_0$.
+  \item In an event with $n_e<2$, the network must accept $2-n_e$ of the remaining objects. The \emph{activation score} $u_e^{\mathrm{OR}}$ is the $(2-n_e)$-th highest network score among the objects the TOB branch did not accept. The event fires if and only if $u_e^{\mathrm{OR}}\geq t$.
+\end{itemize}
+The network threshold $t_b$ is the tie-aware threshold for the scores $\{u_e^{\mathrm{OR}}\}$ with the budget reduced by the base count, $k_{\max}-N_0$. This construction counts mixed events, in which one object passes each branch, exactly.
+
+\subsection{Cross-fitting}
+A threshold calibrated and evaluated on the same background events reports a fake rate of almost exactly $\FPRtarget$ by construction, and hides how well the threshold transfers to new events. Selection steps that compare many calibrated candidates therefore use two-fold cross-fitting. The events (never single objects) are split into two deterministic folds, stratified by class. The threshold is calibrated on fold A and all rates are measured on fold B, then the roles are swapped and the counts are pooled. This applies to the choice of the TOB budget, to checkpoint selection in constrained training, and to the dual updates on the training constraint subset. The plain target-FPR checkpoint rule (\cref{app:training}) calibrates and measures on the full validation set. After selection, one deployment threshold is calibrated on the complete validation set.
+
+\subsection{Event-clustered paired uncertainty}
+Guards compare a candidate classifier with a reference (the baseline or the pretrained model) on the \emph{same} truth $\tau$ objects of a region $r$. Let $d_i=\1[\text{candidate accepts }i]-\1[\text{reference accepts }i]$, let $n$ be the number of objects, $\hat\Delta_r=\frac1n\sum_i d_i$, and $D_e=\sum_{i\in e}d_i$ with $n_e$ objects in event $e$. Objects of one event are correlated, so the standard error is clustered by event ($G$ events):
+\begin{equation}
+  \hat\sigma_r^2=\frac{G}{G-1}\,\frac{\sum_e\big(D_e-\hat\Delta_r n_e\big)^2}{n^2},
+  \qquad L_r=\hat\Delta_r-z\,\hat\sigma_r .
+\end{equation}
+$L_r$ is a one-sided lower confidence bound. The OR budget search uses $z=1$, and constrained-training selection uses $z=z_{0.95}$.
+
+\subsection{Confidence-safe deployment target}
+Let $U(k,N)$ be the exact one-sided Clopper--Pearson upper bound~\cite{clopper1934} on a binomial rate with $k$ firing events out of $N$, $U(k,N)=\mathrm{Beta}^{-1}(1-\alpha;\,k+1,\,N-k)$. The confidence-safe target is $k^\star/N$, where $k^\star$ is the largest $k\leq\lfloor\FPRtarget N\rfloor$ with $U(k,N)\leq\FPRtarget$. The deployed threshold is calibrated to this lower empirical rate. With the validation statistics available, the one-sided $95\%$ target corresponds to an empirical fake rate of about $0.42\%$.

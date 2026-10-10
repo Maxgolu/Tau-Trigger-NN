@@ -1,0 +1,13 @@
+\begin{tabular}{@{}lcccc@{}}
+  \toprule
+   & \multicolumn{2}{c}{BCE} & \multicolumn{2}{c}{IF} \\
+  \cmidrule(lr){2-3}\cmidrule(l){4-5}
+  Input & NN-only & OR ($\bar b^\star$) & OR ($\bar b^\star$) & NN-only \\
+  \midrule
+  \CT        & ---          & 64.53 (99.82) $2.5$ & 65.92 (99.37) $0.5$ & 67.03 (99.02) \\
+  \CT+\Ffeat & ---          & 63.11 (99.73) $3.3$ & 66.97 (99.69) $1.2$ & \textbf{68.40} (98.53) \\
+  \SUM+\Ffeat& 67.82 (96.64) & ---                & 66.40 (99.61) $0.5$ & 67.51 (98.62) \\
+  \midrule
+  Baseline   & \multicolumn{4}{c}{57.37 (99.34)} \\
+  \bottomrule
+\end{tabular}

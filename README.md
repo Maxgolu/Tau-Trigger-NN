@@ -7,22 +7,62 @@ event-level pair model. The pair study asks whether two TOBs can be processed
 together to improve signal acceptance while keeping the background-event false
 positive rate at or below 0.5%.
 
-The event pipeline is fixed:
+The final submitted event pipeline is fixed:
 
 1. Rank finite TOBs within each event by measured `tob_pt`.
-2. Keep at most the four highest-pT TOBs.
-3. Form every unordered same-event pair, up to six pairs per event.
+2. Retain every finite TOB; exact pT ties use increasing `tob_index`.
+3. Form every unordered same-event pair, with no synthetic pair.
 4. Give each pair one model score.
 5. Use the maximum pair score as the event score.
-6. Calibrate every learned model independently from the deterministic baseline.
+6. Combine the neural decision with the calibrated deterministic pT branch.
 
 Measured `tob_pt` remains in its raw source unit, MeV, until plotting or
 evaluation code explicitly converts it.
 
-## Start here: current leading configurations
+## Start here: final submitted system
 
-The table below lists the strongest configurations found so far. We have not
-yet selected the final model or confirmed its performance on untouched data.
+The submitted candidate is `all_finite_equal_event`, configured in
+[`configs/pair_final_all_finite_equal_event/config.json`](configs/pair_final_all_finite_equal_event/config.json).
+It uses the shared two-channel high-resolution EM2 network with 4,357 trainable
+parameters. Training excludes mixed-label pairs, applies the p=-1 positive-pair
+weight, and gives each eligible event equal weight by averaging its complete
+set of pair losses before averaging across events. Inference uses all finite
+pairs without truth filtering.
+
+On the final test population, the three-seed mean inclusive efficiency was
+**46.70%**, compared with **34.30%** for the deterministic second-highest-pT
+baseline: an improvement of **12.40 percentage points**. The complete compact
+result is in
+[`results/final_test/final_result_summary.json`](results/final_test/final_result_summary.json).
+All three measured background false-positive rates were slightly above the
+predeclared 0.5% ceiling (0.5183%--0.5223%), so the stricter conjunctive final
+success rule did not pass even though efficiency improved substantially.
+
+Run the data-free demonstration with:
+
+```bash
+./run_demo.sh
+```
+
+The complete editable joint paper and its compiled review PDF are under
+[`paper/`](paper/). The source preserves Max's existing single-object work and
+integrates the final pair-object methodology, results, lessons, introduction,
+and reproducibility appendix.
+
+The detailed 47-slide pair-study presentation, including its original speaker
+notes and public-reference lists, is preserved at
+[`presentation/pair_model_research_history.pptx`](presentation/pair_model_research_history.pptx).
+It records the controlled research path and earlier validation stages. Use
+[`docs/PRESENTATION_EVIDENCE_AUDIT.md`](docs/PRESENTATION_EVIDENCE_AUDIT.md)
+to distinguish that historical evidence from the frozen final-test result, and
+[`docs/CODE_TO_PRESENTATION.md`](docs/CODE_TO_PRESENTATION.md) for the
+claim-level code, report, and slide crosswalk.
+
+## Earlier controlled configurations
+
+The table below preserves the strongest validation-stage configurations that
+led to the final system. They are supporting experiments, not alternatives to
+the frozen submitted candidate.
 
 Here, high-resolution means that the network processes each TOB's detailed
 12x12 EM2 calorimeter image. The current leader supplies both the absolute
@@ -42,8 +82,8 @@ events. The reported mean is the arithmetic average across seeds 42, 123 and
 background-event false-positive rate is at most 0.5%.
 
 An event passes when its final event score satisfies its calibrated decision
-rule. These efficiencies are adaptive validation evidence. Protected
-confirmation and an unbiased final evaluation remain pending.
+rule. The values in this table are adaptive validation evidence; the final
+test evidence is reported separately above.
 
 The exact configurations are under
 [`configs/pair_highres_two_channel_pt_or/`](configs/pair_highres_two_channel_pt_or/),
@@ -154,10 +194,12 @@ The audited source inventory contains:
 | Background sample | 249,022 |
 | Total | 321,426 |
 
-The complete top-four inventory contains 1,292,919 training-split pairs. The
-eligible training view contains 1,143,864 pairs: every available background
-pair and signal pairs from events whose selected top four contain at least two
-positive TOB labels.
+The earlier top-four inventory contains 1,292,919 training-split pairs. The
+final all-finite training cache contains 2,709,920 eligible same-label pairs
+from 222,709 events, including 27,054 positive pairs. The final training view
+retains every finite TOB, forms every unordered pair, and removes mixed-label
+pairs only from training. Validation and test inference retain all finite
+pairs without truth filtering.
 
 ### Input representations
 
@@ -311,8 +353,19 @@ plotting.
 Install the Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python submission/verify_submission.py
 ```
+
+The pinned environment targets Python 3.11, matching the verified development
+and CI runtime.
+
+The last command verifies the source/config/result hashes, recomputes the
+three-seed summary, and runs the data-free demo. It needs no private data,
+checkpoints, network access, or GPU. `make verify` additionally runs the
+complete test suite after setup.
 
 Place the externally supplied files under a data directory with this layout:
 
@@ -325,6 +378,23 @@ Background/bkg_combined.npz
 
 Raw data, checkpoints, predictions and generated caches are intentionally not
 tracked by Git. The `prongs` field is not used as a model input.
+
+The data-free demo above is completely self-contained. Exact full retraining of
+the frozen final candidate additionally requires the original detector dataset
+and the five small parent-normalization files named in the final configuration.
+Place those externally supplied, hash-verified files under:
+
+```text
+external_artifacts/final_model/train_normalizer.json
+external_artifacts/final_model/parent_absolute_mean.npy
+external_artifacts/final_model/parent_absolute_scale.npy
+external_artifacts/final_model/b01_normalized_mean.npy
+external_artifacts/final_model/b01_normalized_scale.npy
+```
+
+The trainer refuses missing or hash-mismatched moments. It does not silently
+refit normalization on the all-finite cache, because that would no longer
+reproduce the reported final model.
 
 ## Example workflow
 
@@ -420,18 +490,15 @@ python src/pair_plots.py --plot all
 
 ## Results and scope
 
-`results/` contains compact tables and regenerable figures for the controlled
-studies completed so far. This is an evolving, validation-only evidence bundle;
-it is not a complete result set or a final model ranking. See
-`results/README.md` for the available studies and their interpretation limits.
+`results/` contains the compact final-test summary plus tables and regenerable
+figures for the earlier controlled studies. See `results/README.md` for the
+available evidence and its interpretation limits.
 
-Completed evidence in this branch includes the deterministic mechanics, the
-measured-pT-only diagnostic, the representation and high-resolution studies,
-and the validation-only recovery, OR, pT-factorial and pT-context comparisons.
-The latter adaptive studies have not passed protected confirmation. Planned
-work includes confirmation, further controlled feature/model studies,
-deployment assessment and a final unbiased evaluation. No blind-test result is
-included or claimed.
+Completed evidence includes the deterministic mechanics, measured-pT-only
+diagnostic, representation and high-resolution studies, validation-only
+recovery, OR, pT-factorial and pT-context comparisons, and the frozen final
+test evaluation. Earlier adaptive studies remain labeled as validation
+evidence and are not presented as independent final results.
 
 ### Tracked artifacts
 
@@ -465,8 +532,9 @@ Run the complete inherited and pair-model test suite:
 python -m unittest discover -s tests
 ```
 
-The tests cover same-event pairing, top-four selection, deterministic ties,
-label construction, raw and engineered feature mappings, model dimensions,
+The tests cover same-event pairing, top-four and all-finite populations,
+deterministic ties, label construction, equal-event reduction and complete
+event batching, raw and engineered feature mappings, model dimensions,
 maximum event aggregation, no-pair behavior, independent calibration,
 cross-fitted validation and training-only normalization.
 
