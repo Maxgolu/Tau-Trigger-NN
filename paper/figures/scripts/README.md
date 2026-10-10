@@ -1,5 +1,10 @@
 # Figure scripts
 
+For single-object results figures and tables, use
+[the packaged evidence and reproduction commands](../../../results/single_object/README.md).
+The `results/` scripts write to `results/generated/single_object/paper/` by
+default, leaving the approved submission figures and PDF unchanged.
+
 The data figures were made from the real Signal/Background files (training split, seed 42).
 
     python prep.py "path/to/Tau Trigger Project"   # writes obj.pkl, T.npy, E.npy here

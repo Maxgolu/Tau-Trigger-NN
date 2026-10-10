@@ -27,11 +27,11 @@
     "submission/verify_report.py": "aec2262dbfea965c97ff9eaa9a4e4abefb8efb276dc2803a94138a26ddc6f13a",
     "submission/verify_submission.py": "f74f08cee3d7f6ab9dd20888e78ac844600b857684c1959536abaf88be17acf5",
     "submission/original_report_preservation.json": "edf302f3bf5b4d689dc7098bc3318327a2c6f9af32e4f0469b38dc490f692354",
-    "paper/tau_trigger_unified_report.pdf": "9da648a2578057bf9867987b52c6454006f4b6842461eab21215c2d1d9f1e9b2",
+    "paper/tau_trigger_unified_report.pdf": "32be21620c67e491a579cba60b5a4a9f94befc5950b373d3ed3e6c2e42a77e57",
     "docs/REPORT_REVISION_2026_10_10.md": "ef9187d6307a9b9808c70143757bbd057f2035ab8c9ab648c0e8bcbe446566e2",
     "paper/main.tex": "a454174164748bc28e7c34fa04bb6a8b390be563b4a9d6b570d66af2a2f8798d",
     "paper/appendix/K_pair_object.tex": "ea0222e19b515e1cb15c861d083695ef04952d358c179b1cac6b738f9ca07a07",
-    "paper/README.md": "3c691df8b734f929c9ab4dd4351b19206234615e39fe4b00cd0d3dbcb7f8a2f6",
+    "paper/README.md": "23cfa35ef3fae9d1aaace73c81e27f5ee8e0541ad31e0002a6fa3ca76f0abc9c",
     "results/historical_validation/additional_results.csv": "127e082f02bc4188c6648343fd51330035727fe6295f6f6156c768a37216e810",
     "results/historical_validation/provenance.json": "95f7355a057375953bd24d17fac9291a7e6bb95d0e26979ce6903781c5dab762"
   },
@@ -102,5 +102,12 @@
     "predeclared_conjunctive_success_rule_passed": false,
     "seed_aggregation": "arithmetic mean and sample standard deviation; no event pooling and no model ensemble"
   },
-  "historical_exposure_disclosure": "Repository-local identity auditing found no overlap with enumerated Phase-5 confirmation archives, but absence of every possible historical or external test exposure cannot be proven."
+  "historical_exposure_disclosure": "Repository-local identity auditing found no overlap with enumerated Phase-5 confirmation archives, but absence of every possible historical or external test exposure cannot be proven.",
+  "author_approved_pdf_update": {
+    "date": "2026-10-11",
+    "source_filename": "tau_trigger_paper.pdf",
+    "repository_path": "paper/tau_trigger_unified_report.pdf",
+    "sha256": "32be21620c67e491a579cba60b5a4a9f94befc5950b373d3ed3e6c2e42a77e57",
+    "latex_status": "Earlier merged source snapshot; not verified to build the final author-supplied PDF."
+  }
 }

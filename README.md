@@ -13,7 +13,8 @@ used to verify the submitted results.
 - **Pair-model study:** joint processing of two same-event trigger objects,
   event-balanced training, event-level calibration and comparison with the
   deterministic measured-pT baseline.
-- **Report:** editable LaTeX source and the submitted PDF under [`paper/`](paper/).
+- **Report:** author-approved final PDF and an earlier editable LaTeX snapshot
+  under [`paper/`](paper/); see its README for source/PDF status.
 - **Presentation:** the delivered presentation and supporting research-history
   material under [`presentation/`](presentation/).
 - **Reproducibility:** a data-free CPU demonstration, automated submission
@@ -51,6 +52,21 @@ Measured `tob_pt` remains in its raw source unit, MeV, until plotting or
 evaluation code explicitly converts it.
 
 ## Single-object framework
+
+**Start here:** [single-object reproduction guide](docs/SINGLE_OBJECT_REPRODUCTION.md).
+It maps the five paper benchmarks to exact configs and seeds, explains training
+and evaluation, and provides the recovered FT parent checkpoints. The
+[archived measurements and plot scripts](results/single_object/README.md) can
+reconstruct the main numerical results without data or GPU training.
+The [original research README](docs/SINGLE_OBJECT_RESEARCH_REFERENCE.md)
+preserves the detailed single-object workflow that preceded this merged README.
+
+Data-free single-object evidence check (Python standard library only):
+
+```text
+python tools/single_object_artifacts.py verify
+python tools/single_object_summary.py
+```
 
 The first stage of the project studies compact classifiers for individual
 TOBs. Its implementation remains the foundation of the repository:
@@ -95,6 +111,9 @@ Run the data-free demonstration with:
 ```
 
 The complete editable joint paper and submitted PDF are under [`paper/`](paper/).
+The [author-approved final PDF](paper/tau_trigger_unified_report.pdf) was supplied
+as `tau_trigger_paper.pdf`. The existing LaTeX tree is an earlier source snapshot;
+see [paper status](paper/README.md) before rebuilding it.
 They present the single-object study and pair-model extension as one research
 project, followed by shared conclusions, future directions and reproducibility
 material.

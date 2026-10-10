@@ -1,5 +1,20 @@
 # Unified university report
 
+## Author-approved final PDF (2026-10-11)
+
+`tau_trigger_unified_report.pdf` is now an exact copy of the authors' final
+`tau_trigger_paper.pdf`, supplied explicitly for submission. SHA-256:
+`32be21620c67e491a579cba60b5a4a9f94befc5950b373d3ed3e6c2e42a77e57`.
+The filename is retained so existing repository links continue to work.
+
+**Source status:** the LaTeX files below are the earlier merged source snapshot,
+not a verified source match for this final PDF. Do not overwrite the approved
+PDF by compiling this tree. An exact source/PDF match requires the corresponding
+final Overleaf export. The existing report-contract checker verifies that
+earlier source snapshot; it does not establish that it builds the final PDF.
+
+The remainder of this README describes the earlier source snapshot.
+
 This directory contains the complete editable Overleaf source combining Max
 Golubkov's single-object work with Tamar Averbuch's pair-object contribution.
 Max's existing source was preserved and the pair methodology, final result,

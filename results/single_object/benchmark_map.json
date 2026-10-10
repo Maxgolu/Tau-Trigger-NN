@@ -1,0 +1,587 @@
+{
+  "e2v4f_or": {
+    "label": "E2+V4+\\Ffeat, BCE, OR",
+    "params": 8973,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v13_or_bce_s123/run_v13_or_em2ladder_dual_s123_20260827_205421/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v13_or_bce_s123/v13_or_em2ladder_dual_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v13_or_bce_s42/run_v13_or_em2ladder_dual_s42_20260827_205419/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v13_or_bce_s42/v13_or_em2ladder_dual_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v13_or_bce_s456/run_v13_or_em2ladder_dual_s456_20260827_205422/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v13_or_bce_s456/v13_or_em2ladder_dual_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "v3f_or": {
+    "label": "V3+\\Ffeat, IF, OR",
+    "params": 2853,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v8_or_serial_invfreq/run_v8_or_serial_invfreq_s123_20260825_235744/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v8_or_serial_invfreq/v8_or_serial_invfreq_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v8_or_serial_invfreq/run_v8_or_serial_invfreq_s42_20260826_001332/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v8_or_serial_invfreq/v8_or_serial_invfreq_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v8_or_serial_invfreq/run_v8_or_serial_invfreq_s456_20260826_002940/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v8_or_serial_invfreq/v8_or_serial_invfreq_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "e1v4f_ft": {
+    "label": "E1+V4+\\Ffeat, BCE+FT",
+    "params": 9221,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v12_ft_em2single_dual_fracbce/run_v12_ft_em2single_dual_fracbce_s123_20260827_201030/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2single_dual_fracbce/v12_ft_em2single_dual_fracbce_s123.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu08/run_v11_em2single_dual_frac_bce_s123_20260827_165234/model_weights.pt"
+        }
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v12_ft_em2single_dual_fracbce/run_v12_ft_em2single_dual_fracbce_s42_20260827_212346/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2single_dual_fracbce/v12_ft_em2single_dual_fracbce_s42.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu07/run_v11_em2single_dual_frac_bce_s42_20260827_165229/model_weights.pt"
+        }
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v12_ft_em2single_dual_fracbce/run_v12_ft_em2single_dual_fracbce_s456_20260827_223619/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2single_dual_fracbce/v12_ft_em2single_dual_fracbce_s456.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu09/run_v11_em2single_dual_frac_bce_s456_20260827_165259/model_weights.pt"
+        }
+      }
+    ]
+  },
+  "e3v2f_ft": {
+    "label": "E3+V2+\\Ffeat, FT",
+    "params": 5421,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v12_ft_em2stride_conv2x2_frac/run_v12_ft_em2stride_conv2x2_frac_s123_20260827_201030/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2stride_conv2x2_frac/v12_ft_em2stride_conv2x2_frac_s123.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu02/run_v11_em2stride_conv2x2_frac_s123_20260827_164904/model_weights.pt"
+        }
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v12_ft_em2stride_conv2x2_frac/run_v12_ft_em2stride_conv2x2_frac_s42_20260827_212429/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2stride_conv2x2_frac/v12_ft_em2stride_conv2x2_frac_s42.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu01/run_v11_em2stride_conv2x2_frac_s42_20260827_163213/model_weights.pt"
+        }
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v12_ft_em2stride_conv2x2_frac/run_v12_ft_em2stride_conv2x2_frac_s456_20260827_223758/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v12_ft_em2stride_conv2x2_frac/v12_ft_em2stride_conv2x2_frac_s456.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/cnn_v11_gpu03/run_v11_em2stride_conv2x2_frac_s456_20260827_164939/model_weights.pt"
+        }
+      }
+    ]
+  },
+  "mlp_ctf_if": {
+    "label": "MLP, \\CT+\\Ffeat, IF",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "nn_only_core_fraction_s123/run_c002_s123_20260819_233523/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s123/c002_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "nn_only_core_fraction_s42/run_c002_s42_20260819_233518/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s42/c002_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "nn_only_core_fraction_s456/run_c002_s456_20260819_233528/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s456/c002_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "mlp_ctf_if_or": {
+    "label": "MLP, \\CT+\\Ffeat, IF, OR",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "power_law_extended_s123/run_c011_s123_20260819_164811/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s123/c011_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "power_law_extended_s42/run_c011_s42_20260819_135245/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s42/c011_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "power_law_extended_s456/run_c011_s456_20260819_202103/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s456/c011_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "mlp_ctf_p1_or": {
+    "label": "MLP, \\CT+\\Ffeat, $p{=}-1$, OR",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "power_law_extended_s123/run_c010_s123_20260819_163253/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s123/c010_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "power_law_extended_s42/run_c010_s42_20260819_134003/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s42/c010_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "power_law_extended_s456/run_c010_s456_20260819_200933/metrics.json",
+        "config_candidates": [
+          "configs/power_law_extended_s456/c010_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "g002": {
+    "label": "MLP, \\CT+\\Ffeat, FT, OR ($b{=}0.001$)",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "constrained_stage_g_or_s123/run_g002_s123_20260822_144937/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s123/c002_s123.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s123/run_c001_s123_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 42,
+        "metrics": "constrained_stage_g_or_s42/run_g002_s42_20260822_134845/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s42/c002_s42.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s42/run_c001_s42_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 456,
+        "metrics": "constrained_stage_g_or_s456/run_g002_s456_20260822_155100/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s456/c002_s456.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s456/run_c001_s456_20260819_232614/model_weights.pt"
+        }
+      }
+    ]
+  },
+  "g003": {
+    "label": "MLP, \\CT+\\Ffeat, FT, OR ($b{=}0.0015$)",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "constrained_stage_g_or_s123/run_g003_s123_20260822_151207/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s123/c003_s123.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s123/run_c001_s123_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 42,
+        "metrics": "constrained_stage_g_or_s42/run_g003_s42_20260822_140636/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s42/c003_s42.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s42/run_c001_s42_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 456,
+        "metrics": "constrained_stage_g_or_s456/run_g003_s456_20260822_160910/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_g_or_s456/c003_s456.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s456/run_c001_s456_20260819_232614/model_weights.pt"
+        }
+      }
+    ]
+  },
+  "v4": {
+    "label": "V4 (\\CT), IF",
+    "params": 5941,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v6_dualbranch_raw_s123/run_v6_dualbranch_raw_s123_20260825_175253/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v6_dualbranch_raw_s123/v6_dualbranch_raw_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v6_dualbranch_raw_s42/run_v6_dualbranch_raw_s42_20260825_175238/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v6_dualbranch_raw_s42/v6_dualbranch_raw_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v6_dualbranch_raw_s456/run_v6_dualbranch_raw_s456_20260825_175251/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v6_dualbranch_raw_s456/v6_dualbranch_raw_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "v4f": {
+    "label": "V4+\\Ffeat, IF",
+    "params": 5973,
+    "runs": [
+      {
+        "seed": 42,
+        "metrics": "cnn_v7_gpu06/run_v7_dual_frac_s42_20260825_192932/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v7_gpu06/v7_dual_frac_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 123,
+        "metrics": "cnn_v7_gpu07/run_v7_dual_frac_s123_20260825_194240/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v7_gpu07/v7_dual_frac_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v7_gpu08/run_v7_dual_frac_s456_20260825_194157/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v7_gpu08/v7_dual_frac_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "e1v4": {
+    "label": "E1+V4, IF",
+    "params": 9189,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v9_em2single_dual/run_v9_em2single_dual_s123_20260826_013303/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v9_em2single_dual/v9_em2single_dual_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v9_em2single_dual/run_v9_em2single_dual_s42_20260826_014956/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v9_em2single_dual/v9_em2single_dual_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v9_em2single_dual/run_v9_em2single_dual_s456_20260826_020637/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v9_em2single_dual/v9_em2single_dual_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "e1v4f": {
+    "label": "E1+V4+\\Ffeat, IF",
+    "params": 9221,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v10_dual_em2_frac/run_v10_dual_em2_frac_s123_20260826_135352/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v10_dual_em2_frac/v10_dual_em2_frac_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v10_dual_em2_frac/run_v10_dual_em2_frac_s42_20260826_142216/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v10_dual_em2_frac/v10_dual_em2_frac_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v10_dual_em2_frac/run_v10_dual_em2_frac_s456_20260826_145221/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v10_dual_em2_frac/v10_dual_em2_frac_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "e1ctf": {
+    "label": "E1, flat \\CT+\\Ffeat, IF",
+    "params": 5297,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "cnn_v14_em2single_ctflat/run_v14_em2single_ctflat_s123_20260827_233734/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v14_em2single_ctflat/v14_em2single_ctflat_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "cnn_v14_em2single_ctflat/run_v14_em2single_ctflat_s42_20260827_234906/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v14_em2single_ctflat/v14_em2single_ctflat_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v14_em2single_ctflat/run_v14_em2single_ctflat_s456_20260828_000045/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v14_em2single_ctflat/v14_em2single_ctflat_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "mlp_ct": {
+    "label": "MLP, \\CT, IF",
+    "params": 2017,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "nn_only_benchmark_s123/run_c002_s123_20260820_003026/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_benchmark_s123/c002_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "nn_only_benchmark_s42/run_c002_s42_20260820_003013/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_benchmark_s42/c002_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "nn_only_benchmark_s456/run_c002_s456_20260820_003007/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_benchmark_s456/c002_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "e1v4f_bce": {
+    "label": "E1+V4+\\Ffeat, BCE",
+    "params": 9221,
+    "runs": [
+      {
+        "seed": 42,
+        "metrics": "cnn_v11_gpu07/run_v11_em2single_dual_frac_bce_s42_20260827_165229/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v11_gpu07/v11_em2single_dual_frac_bce_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 123,
+        "metrics": "cnn_v11_gpu08/run_v11_em2single_dual_frac_bce_s123_20260827_165234/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v11_gpu08/v11_em2single_dual_frac_bce_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "cnn_v11_gpu09/run_v11_em2single_dual_frac_bce_s456_20260827_165259/metrics.json",
+        "config_candidates": [
+          "configs/cnn_v11_gpu09/v11_em2single_dual_frac_bce_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "mlp_ctf_p1": {
+    "label": "MLP, \\CT+\\Ffeat, $p{=}-1$",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "nn_only_core_fraction_s123/run_c001_s123_20260819_232615/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s123/c001_s123.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 42,
+        "metrics": "nn_only_core_fraction_s42/run_c001_s42_20260819_232615/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s42/c001_s42.json"
+        ],
+        "initialization": null
+      },
+      {
+        "seed": 456,
+        "metrics": "nn_only_core_fraction_s456/run_c001_s456_20260819_232614/metrics.json",
+        "config_candidates": [
+          "configs/nn_only_core_fraction_s456/c001_s456.json"
+        ],
+        "initialization": null
+      }
+    ]
+  },
+  "b1": {
+    "label": "MLP, \\CT+\\Ffeat, $p{=}-1$+FT",
+    "params": 2049,
+    "runs": [
+      {
+        "seed": 123,
+        "metrics": "constrained_stage_h11_20_s123/run_h101_s123_20260823_180231/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_h11_20_s123/h101_s123.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s123/run_c001_s123_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 42,
+        "metrics": "constrained_stage_h11_20_s42/run_h101_s42_20260823_180231/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_h11_20_s42/h101_s42.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s42/run_c001_s42_20260819_232615/model_weights.pt"
+        }
+      },
+      {
+        "seed": 456,
+        "metrics": "constrained_stage_h11_20_s456/run_h101_s456_20260823_180248/metrics.json",
+        "config_candidates": [
+          "configs/constrained_stage_h11_20_s456/h101_s456.json"
+        ],
+        "initialization": {
+          "mode": "pretrained",
+          "weights_path": "experiments/nn_only_core_fraction_s456/run_c001_s456_20260819_232614/model_weights.pt"
+        }
+      }
+    ]
+  }
+}
