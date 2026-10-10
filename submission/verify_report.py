@@ -222,12 +222,8 @@ def verify_terminology_contract() -> None:
 def verify_original_preservation() -> None:
     contract = json.loads((ROOT / "submission" / "original_report_preservation.json").read_text())
     import hashlib
-    for relative, expected in contract["unchanged_files"].items():
-        require(hashlib.sha256((PAPER / relative).read_bytes()).hexdigest() == expected,
-                f"Max's original file changed: {relative}")
-    for relative, blocks in contract["preserved_blocks"].items():
-        # Added passages may occur inside an original block; every original
-        # token must still occur unchanged and in its original order.
+
+    def require_blocks_in_order(relative: str, blocks: list[str], origin: str) -> None:
         tokens = compact(read(relative)).split()
         cursor = 0
         for block in blocks:
@@ -235,7 +231,53 @@ def verify_original_preservation() -> None:
                 try:
                     cursor = tokens.index(token, cursor) + 1
                 except ValueError:
-                    raise RuntimeError(f"Max's original content is missing or replaced: {relative}: {token}")
+                    raise RuntimeError(
+                        f"Max's original content is missing or replaced: {origin} -> {relative}: {token}"
+                    )
+
+    for relative, expected in contract["unchanged_files"].items():
+        require(hashlib.sha256((PAPER / relative).read_bytes()).hexdigest() == expected,
+                f"Max's original file changed: {relative}")
+
+    relocations_by_source: dict[str, list[dict]] = {}
+    for relocation in contract.get("relocations", []):
+        relocations_by_source.setdefault(relocation["source"], []).append(relocation)
+
+    for relative, blocks in contract["preserved_blocks"].items():
+        source_blocks: list[str] = []
+        moved_indices = {
+            index
+            for relocation in relocations_by_source.get(relative, [])
+            for index in relocation.get("block_indices", [])
+        }
+        split_relocations = {
+            relocation["split_block_index"]: relocation
+            for relocation in relocations_by_source.get(relative, [])
+            if "split_block_index" in relocation
+        }
+        for index, block in enumerate(blocks):
+            if index in moved_indices:
+                continue
+            if index in split_relocations:
+                marker = split_relocations[index]["split_marker"]
+                prefix, separator, _ = block.partition(marker)
+                require(bool(separator), f"preservation split marker missing from contract: {relative}")
+                source_blocks.append(prefix)
+                continue
+            source_blocks.append(block)
+        require_blocks_in_order(relative, source_blocks, relative)
+
+    for relocation in contract.get("relocations", []):
+        source = relocation["source"]
+        original_blocks = contract["preserved_blocks"][source]
+        destination_blocks = [original_blocks[index] for index in relocation.get("block_indices", [])]
+        if "split_block_index" in relocation:
+            block = original_blocks[relocation["split_block_index"]]
+            marker = relocation["split_marker"]
+            _, separator, suffix = block.partition(marker)
+            require(bool(separator), f"preservation split marker missing from contract: {source}")
+            destination_blocks.insert(0, marker + suffix)
+        require_blocks_in_order(relocation["destination"], destination_blocks, source)
 
 
 def verify_pair_clarifications() -> None:
