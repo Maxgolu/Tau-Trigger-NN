@@ -30,13 +30,12 @@ choice; those questions require matched validation comparisons
 \paragraph{One event should count once.}
 An event with $n$ TOBs produces $n(n-1)/2$ pairs. Averaging BCE over all pairs
 would therefore give more weight to events with more TOBs, even though the fake
-rate and efficiency count every event once. We first average the loss within
-each event and then across events. More pairs from one event are not more
+rate and efficiency count every event once. We first average weighted loss within each eligible training event and then
+average those event losses equally. More pairs from one event are not more
 independent evidence (\cref{eq:pair_event_loss}).
 
 \paragraph{Keep the final test independent.}
-A large efficiency gain and a missed fake-rate requirement can both be true.
-We therefore fixed the thresholds, denominators and success requirements before
-the final test. This prevents the small rate excess from being hidden by
-recalibration, while still reporting the useful efficiency improvement
+We fixed the thresholds, denominators and success requirements before the
+final test, and applied the selected systems unchanged. Future corrections
+require a separate calibration sample
 (\cref{sec:pair_results,app:pair_protocol}).

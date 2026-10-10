@@ -52,7 +52,8 @@ stage:
   \path{results/shared_encoder/}).
   \item \textbf{Which pairs and events should determine the loss?} The final
   validation study replaced the four-leading-TOB limit with all finite pairs
-  and gave every event equal weight, regardless of its number of pairs. This
+  and averaged loss within each eligible training event before averaging
+  across events. This
   fixed the final configuration in
   \path{configs/pair_final_all_finite_equal_event/} before the test in
   \path{results/final_test/}.
@@ -62,11 +63,83 @@ All intermediate percentages come from validation. Only
 presentation, \path{presentation/pair_model_research_history.pptx}, preserves
 the full experiment sequence and its references.
 
+\clearpage
+\subsection{Concrete findings from the validation studies}
+\label{app:pair_history_findings}
+\Cref{tab:pair_history_findings} retains the principal controlled comparisons
+from the presentation. Percentages are mean inclusive signal-event
+efficiencies across training seeds 42, 123 and 456, except the initial
+single-seed screen; differences are percentage points (pp). These are
+historical adaptive-validation results at a target background-event fake rate
+of $0.5\%$, not independent confirmation. Each row retains its own model and
+comparison setting; its numbers must not be pooled with another row or the
+final test. Additional width, architecture and pair-population results are
+recorded in \path{results/historical_validation/}, alongside the study files
+listed above.
+
+\begin{table}[H]
+  \centering
+  \caption{Concrete historical pair-study findings. Context substitutions use
+  a $44.756\%$ reference; width, architecture and pair-population comparisons
+  use the distinct $44.569\%$ top-four-TOB parent.}
+  \label{tab:pair_history_findings}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \renewcommand{\arraystretch}{1.12}
+  \begin{tabularx}{\linewidth}{@{}p{0.20\linewidth}X@{}}
+    \toprule
+    Study & Measured result and interpretation \\
+    \midrule
+    Representation screen &
+    Of 22 inputs screened with seed 42, three families were reproduced across
+    all three seeds. Raw coarse cells achieved $40.774\%$ without member
+    $\ptTOB$ and $40.851\%$ with it: only $+0.078$ pp, with the ordering
+    changing across seeds. Calorimeter information helped; an extra
+    $\ptTOB$ benefit was not reproducible in this fixed model. \\
+    Shower and context &
+    In a separate fixed-model comparison, adding event context to member
+    $\ptTOB$ gained $3.40$ pp; adding shower summaries gained $4.27$ pp.
+    Their combined interaction was $+1.72$ pp, an empirical performance
+    interaction rather than a demonstrated detector-physics mechanism. \\
+    Output and fusion &
+    Binary ordered, three-class ordered and three-class symmetric models
+    achieved $42.457\%$, $42.539\%$ and $42.425\%$. The changes
+    ($+0.082$ and $-0.114$ pp) were smaller than seed standard deviations
+    ($0.55$--$0.87$ pp); no clear winner was established. \\
+    Member and event $\ptTOB$ &
+    The two-by-two high-resolution input study favoured supplying both:
+    $+10.42$ pp versus baseline for the neural decision and $+10.36$ pp for
+    the OR decision. The direct branch protected high-energy behaviour
+    without materially increasing the strongest inclusive gain. \\
+    Context and width &
+    None of seven context substitutions improved the $44.756\%$ reference;
+    pair sum and balance came closest at $44.519\%$ ($-0.237$ pp).
+    In the separate parent comparison, adding EM2 width gave $43.734\%$
+    ($-0.835$ pp), so it was not retained. \\
+    Architecture and pairs &
+    Symmetric fusion ($44.236\%$) and a whole-pair MLP ($42.484\%$) did
+    not improve the $44.569\%$ parent. Keeping all finite pairs and
+    averaging training loss within events gave $47.242\%$ ($+2.673$ pp).
+    The latter two changes were evaluated together; their separate
+    contributions were not isolated. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Cross-layer cell summation was not retained as a physics-supported
+compression. Equal $3\times3$ array indices do not establish a common
+physical grid across layers with different granularities, and summation also
+removes layer identity. Such a representation requires verified resampling
+onto a common physical grid before it can be interpreted spatially.
+
+\clearpage
 \subsection{Training and model selection}
 The model is trained for 20 epochs with Adam, learning rate $10^{-3}$,
 $\beta=(0.9,0.999)$, $\epsilon=10^{-8}$, no weight decay and no AMSGrad. Seeds
-42, 123 and 456 use loader seed $424200+\mathrm{seed}$. Each update contains all
-pairs from at most 256 shuffled events and uses the loss in
+42, 123 and 456 use loader seed $424200+\mathrm{seed}$. All three pair models
+use the same data split (split seed 42), with training seeds 42, 123 and 456.
+Each update contains all retained training pairs from at most 256 shuffled
+eligible events and uses the loss in
 \eqref{eq:pair_event_loss}. We save one checkpoint per epoch. Validation data
 select one epoch and one OR threshold pair for each seed. Normalisation values
 inherited from the parent model are checked by hash and are never silently
@@ -101,8 +174,23 @@ was not used for retraining, checkpoint selection, threshold changes or
 recalibration. Signal efficiency uses all $14{,}509$ signal events, including
 events without a pair; event fake rate uses all $49{,}777$ background events.
 
+Regional evaluation selects the first eligible pair in deterministic pair
+order among the four highest-$\ptTOB$ TOBs, then uses the lower associated
+truth momentum. The $10$--$25$, $25$--$60$ and $60\GeV$-and-above regions
+contain $1{,}759$, $2{,}811$ and $2{,}612$ signal events, respectively.
+
+The final success criterion requires every seed to satisfy the fake-rate
+ceiling, improve the paired point estimate in every region and inclusively,
+and pass the Holm-adjusted one-sided high-energy McNemar test at $0.05$.
+It is not met; seed 42 also has $p_{\mathrm{adj}}=0.05946$. Any deployment
+recalibration requires a separate calibration sample. A repository-local
+identity audit found no overlap with the enumerated Phase-5 confirmation
+archives; absence of every possible historical or external test exposure
+cannot be proven.
+
 Uncertainty is computed from paired event decisions. For each seed, the
-two-sided $95\%$ interval is obtained from the exact Clopper--Pearson
+conditional two-sided $95\%$ interval, given the observed number of
+discordant decisions $b+c$, is obtained from the exact Clopper--Pearson
 interval~\cite{clopper1934} for $b/(b+c)$ and transformed to the paired
 difference $(b-c)/N$. The one-sided exact McNemar $p$-values for the
 high-energy region are Holm-adjusted across the three seeds. We report the

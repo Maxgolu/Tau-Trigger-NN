@@ -1,0 +1,9 @@
+study,candidate,seed,signal_efficiency,reference_efficiency,difference,background_fpr,reference,evidence_status
+architecture,symmetric_fusion,mean,0.4423612061493545,0.44569134619770995,-0.0033301400483554677,,AR3-B01_top_four,historical_adaptive_validation
+architecture,whole_pair_mlp,mean,0.42484375712786826,0.44569134619770995,-0.020847589069841688,,AR3-B01_top_four,historical_adaptive_validation
+member_shower,em2_width,42,0.4476529355412618,0.45216915286711373,-0.004516217325851923,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation
+member_shower,em2_width,123,0.42630354454632546,0.44067332694676337,-0.014369782400437936,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation
+member_shower,em2_width,456,0.4380730806076365,0.44423155877925274,-0.006158478171616259,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation
+pair_population_and_loss,all_finite_event_average,42,0.4769399206240591,0.4521691528671137,0.024770767756945394,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation
+pair_population_and_loss,all_finite_event_average,123,0.46872861639523744,0.44067332694676337,0.028055289448474068,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation
+pair_population_and_loss,all_finite_event_average,456,0.47160257287532503,0.4442315587792528,0.02737101409607226,0.004992953493054157,AR3-B01_top_four,historical_adaptive_validation

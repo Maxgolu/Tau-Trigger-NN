@@ -1,30 +1,39 @@
 {
   "schema_version": "university-submission-final-system-v1",
-  "status": "released",
+  "status": "revision_candidate_uncommitted",
   "candidate": "all_finite_equal_event",
   "repository_history": {
     "origin_main_base": "92a6edf60734db123cadc23626ce36c14b97b314",
     "pair_public_base": "424edf7ee5d773c43f2c049abade708680fbddfc",
-    "release_commit": "12bd9ee0a41a342bf691bce932ccda27654b43c1"
+    "release_commit": null,
+    "previous_release_commit": "12bd9ee0a41a342bf691bce932ccda27654b43c1"
   },
   "file_bindings": {
     ".github/workflows/ci.yml": "444d8ec42591b9da68234e7cedc01326bb5059b4b76ede32c51c8a824ccaddf7",
-    "configs/pair_final_all_finite_equal_event/config.json": "de284065966ec90ec1e4e92c06f1b42cb87495b37916f23587ae14bfd0d17b2d",
+    "configs/pair_final_all_finite_equal_event/config.json": "18d60e665e7013cd01ca0a1230417b87f2494a3a5df4d82187be666284ed29ac",
     "demo/expected_output.json": "b2bd1a07b412fcd13be36243769b4da76ac3aa1f33719eba5ed57e9a4567c79b",
     "demo/run_demo.py": "89b9fb1700cf1454bb2d3ed28a52a548e1844fc7e7e38930d410e6ea30ebda9e",
     "demo/verify_demo.py": "3ad4227db1c0406136e0526fa175395a24610f3c18927eb2bfa3dc196f5710f7",
     "requirements.txt": "e4fedb2fcd22310957fb57d84dedf42d5674b37a42b4c0a540eecddcf0066ab8",
-    "results/final_test/final_result_summary.json": "f1cb93b206cd6ff5ba143c570d3b18cd6cc33abf9ce707dcb434d2af2bfdc63a",
+    "results/final_test/final_result_summary.json": "07fc3689c0ebe7e575aa82ad8386a3e4ff7c66895ae9d049fd5d1f685f5775e8",
     "results/final_test/seed_results.csv": "5b5e11911f21d029d43c78fd60fc81bfe24d2e7092abe6aa1a80e4ccaa00841a",
     "src/pair_data.py": "fdffd5098650ab1d1a2f431594b686bcd0230cf0cc5c1ce18a912824ac6a2107",
     "src/pair_features.py": "19b54e19d7d1d7b5e353c9ac547553925835d92d07ad2c9d6aa4e1d52fc91df6",
     "src/pair_models.py": "5d9b3fdee3578dde5c1b9825d3ff77f440fa2d3da550b2c9b44c79958bb229cc",
     "src/pair_train.py": "2f52786b5fb8189015d0ca800281c8ccb29231c7da434e26c8e3c56f151b1179",
-    "src/prepare_pair_data.py": "05c95b329d497e92ad5ccfded7cc884117e1540389dc7f2a39db3ea091f13e59",
+    "src/prepare_pair_data.py": "ba2b7fa331a9ced223e7edacce92dcaf8bfd68236cd9dd370944596482622e1a",
     "src/pair_predict.py": "0cfa7970994e6360d5de9aa2f85e86ed6389293de1878b17c30467599e9e3ec9",
     "src/pair_classifiers.py": "2f9630c59253f5b93f744dd3c72085ffafe30337a276c795d30a4078cf5ccf93",
-    "submission/verify_report.py": "ee04e3aec28d8f29d778a6bb7641b92643510e338ecb012603848814d4507a35",
-    "submission/verify_submission.py": "f74f08cee3d7f6ab9dd20888e78ac844600b857684c1959536abaf88be17acf5"
+    "submission/verify_report.py": "c2fc5fb6f22a2e84c8dc0c8861f674f10fc2214a190a688446766789e7c1f041",
+    "submission/verify_submission.py": "f74f08cee3d7f6ab9dd20888e78ac844600b857684c1959536abaf88be17acf5",
+    "submission/original_report_preservation.json": "3b3d315b2b3c1fc8d37a30ada7ff6cddd41b4c9044551790ae75a12cd1bc174a",
+    "paper/tau_trigger_unified_report.pdf": "20d1151513b1416f8cd13e0e1a61563db4e479d5a7aaea0651bedb69b9432ead",
+    "docs/REPORT_REVISION_2026_10_10.md": "d59460e2b068414aad54d0c24bd1f2667490c0f0e56b6daabdb9a5de2c7105c6",
+    "paper/main.tex": "fdb741d4bfa4dea2c22dd73c2a3b2a8fc4dd639514b08bf6364c5fbbf4d7e7b2",
+    "paper/appendix/K_pair_object.tex": "e200b24df963d6a797894b9fc1a35584d4d2b3b08309448d220395b691f97b52",
+    "paper/README.md": "c44854f7d2e91da119f6051b5666d0d33e7ad4ba88288711a0a6efda7f2e0bcf",
+    "results/historical_validation/additional_results.csv": "127e082f02bc4188c6648343fd51330035727fe6295f6f6156c768a37216e810",
+    "results/historical_validation/provenance.json": "95f7355a057375953bd24d17fac9291a7e6bb95d0e26979ce6903781c5dab762"
   },
   "external_data_bindings": {
     "signal_csv_sha256": "857715d639a863f212512c4f3503acad7066ca21a4439a1f6cca9aad22b5e2f6",
@@ -51,14 +60,33 @@
     "architecture": "shared two-channel high-resolution EM2 member encoder and ordered pair head",
     "trainable_parameters": 4357,
     "objective": "p=-1 positive weighting with mean within complete event, then mean across events",
-    "seeds": [42, 123, 456],
+    "seeds": [
+      42,
+      123,
+      456
+    ],
     "epochs": 20,
     "ensemble": false
   },
   "selected_systems": {
-    "42": {"epoch": 17, "checkpoint_sha256": "b6f74de01e81fb1cefb3b2221e7012bb1d99a5d8315790a6292f99710a5da605", "neural_threshold": 0.20193341374397278, "pt_threshold_gev": 127.50000000000001},
-    "123": {"epoch": 18, "checkpoint_sha256": "0b8147d99078b975cda6fab0ddbabacf29bb4c2880171dccfe3c9e4ae14fb02a", "neural_threshold": 0.3519463837146759, "pt_threshold_gev": 33.8},
-    "456": {"epoch": 20, "checkpoint_sha256": "12e193189d585d534a466c5fc6678a3972eca671c361f112ceed5928470a16c3", "neural_threshold": 0.4000909924507141, "pt_threshold_gev": 33.8}
+    "42": {
+      "epoch": 17,
+      "checkpoint_sha256": "b6f74de01e81fb1cefb3b2221e7012bb1d99a5d8315790a6292f99710a5da605",
+      "neural_threshold": 0.20193341374397278,
+      "pt_threshold_gev": 127.50000000000001
+    },
+    "123": {
+      "epoch": 18,
+      "checkpoint_sha256": "0b8147d99078b975cda6fab0ddbabacf29bb4c2880171dccfe3c9e4ae14fb02a",
+      "neural_threshold": 0.3519463837146759,
+      "pt_threshold_gev": 33.8
+    },
+    "456": {
+      "epoch": 20,
+      "checkpoint_sha256": "12e193189d585d534a466c5fc6678a3972eca671c361f112ceed5928470a16c3",
+      "neural_threshold": 0.4000909924507141,
+      "pt_threshold_gev": 33.8
+    }
   },
   "final_result": {
     "signal_event_denominator": 14509,
@@ -66,8 +94,11 @@
     "candidate_seed_mean": 0.4669974958072001,
     "candidate_seed_sample_sd": 0.0032020033231709927,
     "baseline_efficiency": 0.3429595423530223,
-    "mean_paired_improvement_percentage_points": 12.403795345417785,
-    "background_fpr_range": [0.005183116700484159, 0.005223295899712719],
+    "mean_paired_improvement_percentage_points": 12.403795345417786,
+    "background_fpr_range": [
+      0.005183116700484159,
+      0.005223295899712719
+    ],
     "predeclared_conjunctive_success_rule_passed": false,
     "seed_aggregation": "arithmetic mean and sample standard deviation; no event pooling and no model ensemble"
   },

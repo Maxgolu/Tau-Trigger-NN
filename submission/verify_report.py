@@ -42,6 +42,7 @@ PAIR_EVIDENCE_PATHS = (
     "results/shared_encoder",
     "configs/pair_final_all_finite_equal_event",
     "results/final_test",
+    "results/historical_validation",
     "presentation/pair_model_research_history.pptx",
 )
 
@@ -165,9 +166,9 @@ def verify_numerical_contract() -> None:
     fprs = list(summary["background_fpr_by_seed"].values())
     fpr_range = f"{min(fprs) * 100:.4f}$--${max(fprs) * 100:.4f}"
     require(fpr_range in results, "background FPR range drift")
-    require("required $0.5\\%$" in results, "the event fake-rate requirement is missing")
+    require("$0.5\\%$ fake-rate limit" in compact(results), "the event fake-rate requirement is missing")
     require(
-        "final success criterion" in results and "it is not met" in results,
+        "final success criterion" in appendix and "It is not met" in appendix,
         "the failed final success criterion is not stated explicitly",
     )
 
@@ -194,6 +195,10 @@ def verify_terminology_contract() -> None:
         "member encoder",
         "final test population",
     )
+    # Retain Max's original titles even where newer prose uses "pair model".
+    prose = prose.replace("Input unit: single-object and pair-object models", "")
+    prose = prose.replace("Pair-object models.", "")
+    prose = prose.replace("team's pair-object work", "")
     for phrase in discouraged_phrases:
         require(phrase not in prose.lower(), f"unnecessarily abstract report terminology: {phrase}")
 
@@ -214,8 +219,105 @@ def verify_terminology_contract() -> None:
     require("not used for" in appendix and "recalibration" in appendix, "test-recalibration prohibition is missing")
 
 
+def verify_original_preservation() -> None:
+    contract = json.loads((ROOT / "submission" / "original_report_preservation.json").read_text())
+    import hashlib
+    for relative, expected in contract["unchanged_files"].items():
+        require(hashlib.sha256((PAPER / relative).read_bytes()).hexdigest() == expected,
+                f"Max's original file changed: {relative}")
+    for relative, blocks in contract["preserved_blocks"].items():
+        # Added passages may occur inside an original block; every original
+        # token must still occur unchanged and in its original order.
+        tokens = compact(read(relative)).split()
+        cursor = 0
+        for block in blocks:
+            for token in block.split():
+                try:
+                    cursor = tokens.index(token, cursor) + 1
+                except ValueError:
+                    raise RuntimeError(f"Max's original content is missing or replaced: {relative}: {token}")
+
+
+def verify_pair_clarifications() -> None:
+    summary = json.loads(SUMMARY.read_text())
+    results = compact(read("sections/05_results.tex"))
+    appendix = compact(read("appendix/K_pair_object.tex"))
+    methodology = compact(read("sections/04_methodology.tex"))
+    baseline = summary["baseline_background"]
+    require(abs(baseline["fpr"] - baseline["accepted"] / baseline["denominator"]) < 1e-15,
+            "baseline fake-rate arithmetic drift")
+    require(f"{baseline['fpr'] * 100:.4f}" in results, "baseline achieved fake rate missing")
+    require("not at matched achieved rates" in results, "achieved-rate distinction missing")
+    require("conditional two-sided" in appendix and "discordant decisions $b+c$" in appendix,
+            "conditional uncertainty definition missing")
+    require(f"split seed {summary['data_split_seed']}" in appendix, "common pair data split missing")
+    require("first pair in deterministic pair order" in results, "regional representative-pair rule missing")
+    for n in summary["regional_signal_denominators"].values():
+        require(f"{n:,}".replace(",", "{,}") in appendix, "regional sample size missing")
+    require(r"\mathcal{P}^{\mathrm{train}}_e" in methodology, "retained training-pair set missing")
+    # The rate-limit qualification occupies one sentence in the main text.
+    require(results.count("exceeded") == 1, "rate-limit qualification must be concise")
+
+def verify_historical_findings() -> None:
+    """Recompute the added historical findings from the public result files."""
+    import statistics
+    import hashlib
+
+    def rows(relative: str) -> list[dict[str, str]]:
+        with (ROOT / "results" / relative).open(newline="", encoding="utf-8") as stream:
+            return list(csv.DictReader(stream))
+
+    appendix = compact(read("appendix/K_pair_object.tex"))
+    expected: list[str] = []
+    screen = rows("representation_reproduction/seed42_scalar_coarse_screen.csv")
+    require(len(screen) == 22 and sum(r["screen_decision"] == "reproduced_across_three_seeds" for r in screen) == 3,
+            "historical representation screen count drift")
+    representation = {r["candidate"]: r for r in rows("representation_reproduction/global_summary.csv")}
+    no_pt = float(representation["raw_coarse_cells_without_member_pt"]["mean_inclusive_signal_efficiency"])
+    with_pt = float(representation["raw_coarse_cells_with_member_pt"]["mean_inclusive_signal_efficiency"])
+    expected.extend(f"{v * 100:.3f}" for v in [no_pt, with_pt, with_pt - no_pt])
+    expected.extend(f"{float(r['mean_validation_point_difference']) * 100:.2f}" for r in rows("representation_study/gain_source_effects.csv"))
+    outputs = [r for r in rows("representation_study/representation_validation.csv") if r["study"] == "output_fusion"]
+    require(len(outputs) == 3, "historical output/fusion comparison incomplete")
+    expected.extend(f"{float(r['mean_inclusive_efficiency']) * 100:.3f}" for r in outputs)
+    expected.extend(f"{(float(outputs[i]['mean_inclusive_efficiency']) - float(outputs[i-1]['mean_inclusive_efficiency'])) * 100:+.3f}" for i in [1, 2])
+    factorial = [r for r in rows("pt_factorial/summary.csv") if r["candidate"] == "member_pt_and_event_pt"]
+    require(len(factorial) == 2, "historical pT input comparison incomplete")
+    expected.extend(f"{float(r['mean_delta_vs_baseline_percentage_points']):.2f}" for r in factorial)
+    context = {r["candidate"]: r for r in rows("pt_context/summary.csv")}
+    require(len(context) == 9, "historical seven-context comparison incomplete")
+    expected.extend(f"{float(context[k]['mean_inclusive_signal_efficiency']) * 100:.3f}" for k in ["current_member_pt_and_event_second_pt", "pair_sum_and_balance"])
+    expected.append(f"{float(context['pair_sum_and_balance']['delta_vs_current']) * 100:.3f}")
+    history = rows("historical_validation/additional_results.csv")
+    require(len(history) == 8, "historical additional-results population drift")
+    for r in history:
+        require(r["evidence_status"] == "historical_adaptive_validation", "historical evidence status drift")
+        require(abs(float(r["signal_efficiency"]) - float(r["reference_efficiency"]) - float(r["difference"])) < 1e-14,
+                "historical comparator arithmetic drift")
+    for name in ["symmetric_fusion", "whole_pair_mlp", "em2_width", "all_finite_event_average"]:
+        subset = [r for r in history if r["candidate"] == name]
+        expected.append(f"{statistics.mean(float(r['signal_efficiency']) for r in subset) * 100:.3f}")
+        if name in ["em2_width", "all_finite_event_average"]:
+            expected.append(f"{statistics.mean(float(r['difference']) for r in subset) * 100:+.3f}")
+        expected.append(f"{statistics.mean(float(r['reference_efficiency']) for r in subset) * 100:.3f}")
+    provenance = json.loads((ROOT / "results/historical_validation/provenance.json").read_text())
+    require(hashlib.sha256((ROOT / "results/historical_validation/additional_results.csv").read_bytes()).hexdigest() == provenance["additional_results_csv_sha256"],
+            "historical aggregate evidence hash drift")
+    for value in expected:
+        require(value in appendix, f"historical report value missing or changed: {value}")
+    require("historical adaptive-validation results" in appendix and "not independent confirmation" in appendix,
+            "historical validation qualification missing")
+    require("their separate contributions were not isolated" in appendix,
+            "combined population/loss comparison must not imply isolated contributions")
+    require("common physical grid" in appendix and "removes layer identity" in appendix,
+            "cross-layer spatial compatibility qualification missing")
+
+
 def main() -> int:
     verify_structure()
+    verify_original_preservation()
+    verify_pair_clarifications()
+    verify_historical_findings()
     verify_citations()
     verify_evidence_paths()
     verify_numerical_contract()

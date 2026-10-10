@@ -13,27 +13,17 @@ The constrained objective used manually specified regions, floors and update rat
 
 Loss and representation should also be studied jointly. IF helped several compact-input configurations, whereas plain BCE followed by fine-tuning gave the highest global efficiency on the richest tested inputs. A modular objective could adapt to the starting score distribution and representation while preserving the requirements in \cref{app:loss_requirements}. Any data-driven choices must use training or validation data, with a held-out evaluation after the choices are fixed.
 
-\subsection{Using the whole event}
-The pair model sees two TOBs at a time and keeps only the highest pair score. A
-whole-event model could instead learn from all TOBs together. Because the TOBs
-have no meaningful order, changing their order should not change the decision.
-Deep Sets provide one way to build this property into a network
-\cite{zaheer2017deepsets}; Set Transformers can additionally learn interactions
-between TOBs using attention \cite{lee2019settransformer}. Such models should
-accept a variable number of TOBs, with masks for absent inputs rather than
-treating padding as detector information. Varying the number of retained TOBs
-would measure the value of additional context against latency and resource
-cost.
+\subsection{Whole-event architectures and object multiplicity}
+A whole-event model could learn which candidates belong together and whether their joint geometry is consistent with a tau event. Study architectures that process a variable-size set of candidate features and scores, using permutation-invariant aggregation or an explicitly relational mechanism. Vary the number of retained objects to measure the value of context against latency and resource cost; use masking for absent candidates rather than treating padding as physical input.
 
-Pairwise angular separations, relative energies and correlations among shower
-shapes can then affect one joint event decision. Define whether the output is
-an event score or context-aware object scores, and match both approaches at the
-same event-level background rate. Preserve event-level splits, give each event
-equal weight during training, and report the event metric as well as compatible object-level
-efficiencies. The current sample retains at most six TOBs: testing candidates
-beyond that limit requires a new extraction, not merely changing the model's
-input size. Since the existing final test has already informed the present
-study, this comparison requires a new held-out evaluation sample.
+Pairwise angular separations, relative energies and correlations among shower shapes can then affect a joint event decision instead of being attached to independent object scores. Define whether the output is an event score or context-aware object scores, and match both approaches at the same event-level background rate. Preserve event-level splits and report the event metric as well as compatible object-level efficiencies. The current sample retains at most six TOBs: testing candidates beyond that limit requires a new extraction, not merely changing the model's input size. This direction extends the single-object study and should be coordinated with the team's pair-object work.
+
+The pair study now provides a starting point for this direction. Deep Sets
+provide a permutation-invariant network construction\cite{zaheer2017deepsets};
+Set Transformers model interactions through attention\cite{lee2019settransformer}.
+Average training losses within eligible events before averaging across events.
+Since the existing final test has informed the present study, further model
+comparisons require a new held-out evaluation sample.
 
 \subsection{Richer inputs for the low-energy region}
 Low-energy taus remained difficult across substantially different models, and shared errors suggest that the current representation is a limiting factor, though they do not establish a fundamental information bound (\cref{app:analysis_capacity}). Candidate additions include finer granularity in non-EM2 layers, wider calorimeter windows, timing or tracking quantities and neighbouring-object context. These are options to investigate only where detector readout and the intended trigger stage make them available.

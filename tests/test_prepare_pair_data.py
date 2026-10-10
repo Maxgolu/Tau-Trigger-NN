@@ -1,5 +1,8 @@
 import sys
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -292,6 +295,56 @@ class PairPreparationTests(unittest.TestCase):
         right.loc[0, "truth_pt"] = np.nan
         with self.assertRaisesRegex(ValueError, "positive training pair"):
             _member_min_truth_pt_gev(analysis, right, np.array([1.0]))
+
+    def test_final_training_population_matches_frozen_same_label_rule(self):
+        # Exhaust all binary label patterns up to six TOBs. Signal events
+        # without two positive members must still teach their negative pairs.
+        rows = []
+        expected = []
+        inventory_rows = []
+        event_id = 0
+        for count in range(7):
+            for labels in product((0, 1), repeat=count):
+                event_id += 1
+                inventory_rows.append({"eventNumber": event_id, "sample": "signal", "split": "train"})
+                for member, label in enumerate(labels):
+                    row = {"eventNumber": event_id, "tob_index": member,
+                           "tob_pt": float(100 - member), "signal": label}
+                    row.update({name: float(member + 1) for name in CORE_COLUMNS})
+                    row.update({name: 0.0 for name in EM2_COLUMNS})
+                    rows.append(row)
+                for a in range(count):
+                    for b in range(a + 1, count):
+                        if labels[a] == labels[b]:
+                            expected.append((event_id, a, b, labels[a]))
+        frame = pd.DataFrame(rows)
+        inventory = pd.DataFrame(inventory_rows)
+        with patch("prepare_pair_data.TrainingDataCache") as cache, patch(
+            "prepare_pair_data._source_event_inventory", return_value=inventory
+        ):
+            cache.return_value.get_dataset.return_value = SimpleNamespace(frame=frame)
+            arrays = prepare_pair_split(
+                "unused", split="train", representation="raw_cells",
+                pair_population="all_finite", training_pair_filter="same_label_only",
+            )
+        actual = [(int(e), int(pair[0]), int(pair[1]), int(label)) for e, pair, label in zip(
+            arrays["pair_event_ids"], arrays["pair_tob_indices"], arrays["labels"]
+        )]
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(arrays["event_ids"]), len(inventory))
+
+    def test_final_same_label_filter_does_not_filter_validation_pairs(self):
+        frame = self.frame.assign(signal=[1, 0])
+        inventory = pd.DataFrame({"eventNumber": [7], "sample": ["signal"], "split": ["validation"]})
+        with patch("prepare_pair_data.TrainingDataCache") as cache, patch(
+            "prepare_pair_data._source_event_inventory", return_value=inventory
+        ):
+            cache.return_value.get_dataset.return_value = SimpleNamespace(frame=frame)
+            arrays = prepare_pair_split(
+                "unused", split="validation", representation="raw_cells",
+                pair_population="all_finite", training_pair_filter="same_label_only",
+            )
+        self.assertEqual(arrays["three_class_labels"].tolist(), [1])
 
     def test_truth_weight_coordinate_is_rejected_for_holdout_before_data_access(self):
         with self.assertRaisesRegex(ValueError, "training-only analysis field"):

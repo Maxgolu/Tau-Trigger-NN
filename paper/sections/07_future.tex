@@ -6,7 +6,11 @@ Four directions follow from the remaining accuracy--resource trade-off:
 \begin{itemize}
   \item \textbf{Smaller CNNs.} Reduce channels and head widths, prune, quantise and distil strong models into compact students; validate the resulting efficiency, latency and FPGA resource use.
   \item \textbf{Adaptive loss design.} Derive target regions and tolerances from the starting model's weaknesses, with uncertainty-aware updates that adapt to the input representation.
-  \item \textbf{Beyond pairs.} Extend the pair model to a variable-size event network whose output does not depend on TOB order. Compare it at the same event fake rate, give each event equal weight during training and use a new held-out evaluation sample.
+  \item \textbf{Whole-event learning.} Vary the number of input objects and design an event-level architecture that can learn dependencies between candidates, rather than scoring each in isolation.
   \item \textbf{Richer detector inputs.} The limited detector information available to our models leaves low-energy tau and background deposits difficult to distinguish. Richer measurements and finer spatial resolution at the input stage could therefore be crucial, rather than further model complexity alone.
 \end{itemize}
 \Cref{app:future} develops these directions and their evaluation requirements.
+
+The completed pair study motivates extending this direction to a variable-size
+event network, averaging training losses within events and using a new
+held-out evaluation sample.

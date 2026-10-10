@@ -409,10 +409,14 @@ def prepare_pair_split(
 
     pair_frame = pairs.pairs
     if split == "train":
-        eligible_events = set(events.loc[events["training_eligible"], "eventNumber"])
-        pair_frame = pair_frame.loc[
-            pair_frame["eventNumber"].isin(eligible_events)
-        ].reset_index(drop=True)
+        # The frozen final pipeline retains every same-label pair, including
+        # negative pairs in signal events without two positive TOBs.
+        # Preserve the event gate for historical preparation modes.
+        if not (pair_population == "all_finite" and training_pair_filter == "same_label_only"):
+            eligible_events = set(events.loc[events["training_eligible"], "eventNumber"])
+            pair_frame = pair_frame.loc[
+                pair_frame["eventNumber"].isin(eligible_events)
+            ].reset_index(drop=True)
         if training_pair_filter == "same_label_only":
             pair_frame = pair_frame.loc[
                 pair_frame["three_class_label"].ne(1)

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "scope": "Aggregated historical adaptive-validation evidence for the additional Appendix K table; not final-test or protected confirmation.",
+  "source_file_sha256": {
+    "research_report/rapid_screen_factory_staged/symmetric_fusion_v1/joint_or/AR3-F01/three_seed_summary.json": "3984dfa75950377c871e6f97196338f2c4e032adff9081288db19e662c93f3af",
+    "research_report/rapid_screen_factory_staged/whole_pair_topology_v1/joint_or/AR3-F02/three_seed_summary.json": "d14ecb1da3a4185fdc988de72ee2f8007e63263876e169e2e5929e613c0d7fb1",
+    "research_report/rapid_screen_factory_staged/member_shower_h01_validation_v10/joint_or/AR3-H01/seed_42/result.json": "5b27cb091ef450c92185842bda91963cc4d89542bd421233512713d1d834aaad",
+    "research_report/rapid_screen_factory_staged/member_shower_h01_validation_v10/joint_or/AR3-H01/seed_123/result.json": "58bed11a8730d880f67093eb217ff7b55a9d4821956559e020209d7b7cebb09a",
+    "research_report/rapid_screen_factory_staged/member_shower_h01_validation_v10/joint_or/AR3-H01/seed_456/result.json": "d8153d3031235583b58aafd44956126ca35b2a4653a5b4e0b358f43a21e95721",
+    "research_program/reporting_staging/all_finite_equal_event_winner_freeze_v1/slide_handoff.json": "86b7762873e9a1740d7077a8a57f0830cb1d2ac6962e932fff8a92da88316ae0"
+  },
+  "additional_results_csv_sha256": "127e082f02bc4188c6648343fd51330035727fe6295f6f6156c768a37216e810",
+  "existing_public_evidence": [
+    "results/representation_reproduction/seed42_scalar_coarse_screen.csv",
+    "results/representation_reproduction/global_summary.csv",
+    "results/representation_study/gain_source_effects.csv",
+    "results/representation_study/representation_validation.csv",
+    "results/pt_factorial/summary.csv",
+    "results/pt_context/summary.csv"
+  ],
+  "qualification": "The 44.756% pT-context reference differs from the 44.569% AR3-B01 architecture/width/population reference. All-finite population and event-averaged loss changed together; no separate causal contribution is established.",
+  "presentation_source": "pair_model_streamlined_talk_v52_public.pptx, slides 23, 28-32, 40-46"
+}

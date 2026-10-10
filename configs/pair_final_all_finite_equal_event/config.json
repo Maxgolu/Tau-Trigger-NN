@@ -1,10 +1,17 @@
 {
   "experiment_name": "pair_final_all_finite_equal_event",
-  "seeds": [42, 123, 456],
+  "seeds": [
+    42,
+    123,
+    456
+  ],
   "representation": "high_resolution_em2",
   "pair_population": "all_finite",
   "training_pair_filter": "same_label_only",
-  "image_channels": ["absolute", "signed_normalized"],
+  "image_channels": [
+    "absolute",
+    "signed_normalized"
+  ],
   "include_coarse_cells": true,
   "include_member_pt": true,
   "include_fraction": true,
@@ -16,17 +23,37 @@
     "member_scalar_width": 47,
     "context_width": 1,
     "member_embedding_width": 16,
-    "pair_head": [33, 32, 16, 1],
+    "pair_head": [
+      33,
+      32,
+      16,
+      1
+    ],
     "initialization": "seeded_kaiming_uniform_leaky_relu_0.1",
     "trainable_parameters": 4357
   },
   "normalization": {
     "mode": "frozen_parent_files",
-    "parent_normalizer": {"path": "external_artifacts/final_model/train_normalizer.json", "sha256": "7b8ace3cc8027845f4e2c505010b60292000a15a650cdf51881176d1f16f7ae9"},
-    "absolute_mean": {"path": "external_artifacts/final_model/parent_absolute_mean.npy", "sha256": "20727981985ad569b0f41622ca2d5eb468fb2fb48c07a9473fd5d6d1b5814629"},
-    "absolute_scale": {"path": "external_artifacts/final_model/parent_absolute_scale.npy", "sha256": "19a4f6b6c2c878c8dffd9253c2533ad15eb9f244c7737f5444fd78da18a697d2"},
-    "normalized_mean": {"path": "external_artifacts/final_model/b01_normalized_mean.npy", "sha256": "f5ad4b871453e876a46f7c66a32a84b1b006b74f927507cf46f42dc6584027a4"},
-    "normalized_scale": {"path": "external_artifacts/final_model/b01_normalized_scale.npy", "sha256": "46a0fd0cc72056a56cc90bd5988083c95a43d53d1489e5df86c0490eb247dcac"}
+    "parent_normalizer": {
+      "path": "external_artifacts/final_model/train_normalizer.json",
+      "sha256": "7b8ace3cc8027845f4e2c505010b60292000a15a650cdf51881176d1f16f7ae9"
+    },
+    "absolute_mean": {
+      "path": "external_artifacts/final_model/parent_absolute_mean.npy",
+      "sha256": "20727981985ad569b0f41622ca2d5eb468fb2fb48c07a9473fd5d6d1b5814629"
+    },
+    "absolute_scale": {
+      "path": "external_artifacts/final_model/parent_absolute_scale.npy",
+      "sha256": "19a4f6b6c2c878c8dffd9253c2533ad15eb9f244c7737f5444fd78da18a697d2"
+    },
+    "normalized_mean": {
+      "path": "external_artifacts/final_model/b01_normalized_mean.npy",
+      "sha256": "f5ad4b871453e876a46f7c66a32a84b1b006b74f927507cf46f42dc6584027a4"
+    },
+    "normalized_scale": {
+      "path": "external_artifacts/final_model/b01_normalized_scale.npy",
+      "sha256": "46a0fd0cc72056a56cc90bd5988083c95a43d53d1489e5df86c0490eb247dcac"
+    }
   },
   "target": "both_members_tau_labelled",
   "loss": {
@@ -38,8 +65,11 @@
   "optimizer": {
     "name": "adam",
     "learning_rate": 0.001,
-    "betas": [0.9, 0.999],
-    "epsilon": 1e-8,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "epsilon": 1e-08,
     "weight_decay": 0.0,
     "amsgrad": false
   },
@@ -50,10 +80,16 @@
   "event_classifier": {
     "name": "neural_or_pair_min_pt",
     "total_background_event_fpr": 0.005,
-    "validation_pt_branch_budgets": [0.0, 0.001, 0.002, 0.003],
+    "validation_pt_branch_budgets": [
+      0.0,
+      0.001,
+      0.002,
+      0.003
+    ],
     "pt_pair_score": "lower_measured_member_pt",
     "overlap_counting": "union",
     "calibration": "joint_event_level"
   },
-  "target_event_fpr": 0.005
+  "target_event_fpr": 0.005,
+  "split_seed": 42
 }

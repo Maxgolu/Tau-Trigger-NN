@@ -3,7 +3,9 @@
 \section{Results and Benchmarking}
 \label{sec:results}
 % ============================================================================
-Unless stated otherwise, our results use the fixed-rate protocol of \cref{sec:setting}: achieved event fake rates are $0.498$--$0.499\%$, band efficiencies pool tau counts, and entries are three-seed means with standard errors. Checkpoints and OR budgets are selected on validation; test-background recalibration is used only for fixed-rate reporting. Ranking finished configurations is descriptive, not a further unbiased test. The prior-work reference has a different protocol (\cref{app:prior_reference}). \Cref{tab:naming} decodes all model names; IF denotes inverse-frequency weighting, whereas $p$ denotes the separate $t^{-p}$ profile.
+The fixed-rate protocol below applies to the single-object results;
+\cref{sec:pair_results} reports the pair model with unchanged validation thresholds.
+Our results use the fixed-rate protocol of \cref{sec:setting}: achieved event fake rates are $0.498$--$0.499\%$, band efficiencies pool tau counts, and entries are three-seed means with standard errors. Checkpoints and OR budgets are selected on validation; test-background recalibration is used only for fixed-rate reporting. Ranking finished configurations is descriptive, not a further unbiased test. The prior-work reference has a different protocol (\cref{app:prior_reference}). \Cref{tab:naming} decodes all model names; IF denotes inverse-frequency weighting, whereas $p$ denotes the separate $t^{-p}$ profile.
 
 % ----------------------------------------------------------------------------
 \subsection{Benchmark: performance under different size and plateau requirements}
@@ -60,8 +62,8 @@ Constrained fine-tuning redistributed efficiency towards protected or rewarded r
 \label{sec:pair_results}
 % ----------------------------------------------------------------------------
 \paragraph{Seeing two TOBs together improves the turn-on.}
-The selected model scores every pair of finite-$\ptTOB$ TOBs and gives every
-event equal weight during training. Unlike the fixed-rate comparisons above,
+The selected model scores every pair of finite-$\ptTOB$ TOBs and averages
+training losses within eligible events before averaging across events. Unlike the fixed-rate comparisons above,
 we did not recalibrate its thresholds on the test set. The checkpoint and both
 branch thresholds were selected on validation and then applied unchanged; the
 $\ptTOB$ baseline uses
@@ -74,9 +76,9 @@ for seeds 42, 123 and 456, respectively.
 For this subsection only, signal efficiency is the fraction of signal events
 that fire. Elsewhere in the paper it is the fraction of truth-$\tau$ objects
 accepted, so the two percentages are not directly comparable. For the
-energy-bin results, we use eligible signal events in which a pair among the
-four highest-$\ptTOB$ TOBs has two positive training labels and two finite
-truth momenta. The event is assigned the lower of those two momenta. These
+energy-bin results, we choose the first pair in deterministic pair order
+among the four highest-$\ptTOB$ TOBs with two positive labels and two finite
+truth momenta, and assign the event their lower truth momentum. These
 values are therefore also not directly comparable with
 \cref{tab:results_main,fig:results_main}.
 
@@ -84,7 +86,8 @@ values are therefore also not directly comparable with
   \centering
   \caption{Final pair model test efficiency and achieved event fake rate. The
   baseline is the second-highest finite-$\ptTOB$
-  rule. Differences are paired within the same $14{,}509$ signal events.}
+  rule (baseline fake rate: $0.4842\%$). Differences are paired within the
+  same $14{,}509$ signal events.}
   \label{tab:pair_final}
   \small
   \setlength{\tabcolsep}{7pt}
@@ -101,16 +104,8 @@ $60\GeV$ gains 0.78 points. This establishes the performance of the selected
 pair model; the final test alone does not show which design choice caused the
 improvement.
 
-\paragraph{The efficiency gain comes with a small rate excess.}
-The three test event fake rates, $0.5183$--$0.5223\%$, are all above the
-required $0.5\%$. Seed 42 also misses the adjusted high-energy significance
-requirement ($p_{\mathrm{adj}}=0.05946$). Our final success criterion required
-both conditions, so it is not met, even though every model improves the
-overall efficiency.
-The operating point should be recalibrated on a new calibration sample before
-deployment; the test set must not be reused for that correction. A
-repository-local identity audit found no overlap with the enumerated Phase-5
-confirmation archives. Complete absence of every possible historical or
-external test exposure cannot be proven, so the result should be interpreted
-with that exposure uncertainty. Exact thresholds, hashes and uncertainty
-procedures appear in \cref{app:pair_protocol}.
+With validation-selected thresholds held fixed, the three pair models exceeded
+the $0.5\%$ fake-rate limit ($0.5183$--$0.5223\%$, versus $0.4842\%$ for the
+baseline), so the reported gain is not at matched achieved rates.
+Exact thresholds, the final success criterion, historical-exposure
+qualification and uncertainty procedures appear in \cref{app:pair_protocol}.
