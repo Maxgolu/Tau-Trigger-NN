@@ -1,5 +1,9 @@
 # Pair-Based Tau Trigger Classifier
 
+## Video demonstration
+
+[Watch the project demo](demo/demo-atlas-tau.mp4) (1 min 48 s, 1080p MP4).
+
 ## Overview
 
 This branch extends the single-object tau-classification framework with an
