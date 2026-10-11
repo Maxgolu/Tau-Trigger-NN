@@ -26,7 +26,6 @@
     "figures/fig_results_main.pdf": "66b964efe6a5c62f15a0f737b68d6812e80b8c4016a2cbdf7d0de882a47d21ae",
     "figures/fig_tensor.py": "9af30d3f055f0319a496d12ec813c424697c2f98cab9f1ff8bdb48d40de0033b",
     "figures/prep.py": "e510b305d7a429ecfbaf6a69ad0c7f0403ee00a0c9a5333c431db50c78eea88b",
-    "figures/scripts/README.md": "f4f1a3f3e8a368032da4cab8306ce801155f1fea06e3972ce75a9e6351fcb0aa",
     "figures/scripts/fig_app.py": "9d53664fe6eed8b3adda1e683df2d6f9ef73bb60bb3b6295a15d60b6211f2dfc",
     "figures/scripts/fig_feat.py": "d8dca82f03a2b2f9958bb9ceea7016b5d3e3e773126764d9fe69cd5b7dbbccf4",
     "figures/scripts/fig_tensor.py": "9af30d3f055f0319a496d12ec813c424697c2f98cab9f1ff8bdb48d40de0033b",
@@ -54,6 +53,15 @@
     }
   },
   "approved_replacements": {
+    "figures/scripts/README.md": {
+      "original_sha256": "f4f1a3f3e8a368032da4cab8306ce801155f1fea06e3972ce75a9e6351fcb0aa",
+      "replacements": [
+        {
+          "original": "# Figure scripts\n",
+          "revised": "# Figure scripts\n\nFor single-object results figures and tables, use\n[the packaged evidence and reproduction commands](../../../results/single_object/README.md).\nThe `results/` scripts write to `results/generated/single_object/paper/` by\ndefault, leaving the approved submission figures and PDF unchanged.\n"
+        }
+      ]
+    },
     "sections/02_background.tex": {
       "original_sha256": "ec8fa92041e5f9e01f63577c193c3adbfb92b4337111a225ec2b69c2d5bcbd59",
       "replacements": [
